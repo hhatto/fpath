@@ -18,7 +18,7 @@ lazy_static! {
 
 macro_rules! numsep {
     ( $x:expr ) => (
-        String::from_utf8((0..$x).map(|_| '/' as u8).collect::<Vec<u8>>()).unwrap()
+        String::from_utf8((0..$x).map(|_| SEP).collect::<Vec<u8>>()).unwrap()
     )
 }
 
@@ -46,7 +46,7 @@ fn _joinrealpath(path_str: &str, rest: &str, seen: HashMap<String, Option<String
     let mut use_seen = seen.clone();
     let (mut ret_path, mut use_rest) = if _isabs(rest) {
         let (_head, tail) = rest.split_at(1);
-        (SEP.to_string(), tail)
+        (MAIN_SEPARATOR.to_string(), tail)
     } else {
         (path_str.to_string(), rest)
     };
@@ -103,12 +103,12 @@ fn _joinrealpath(path_str: &str, rest: &str, seen: HashMap<String, Option<String
 pub fn _inner_join(path_str: &str, path_list: &[&str]) -> String {
     let mut ret_path = String::from(path_str);
     for b in path_list {
-        if b.starts_with('/') {
+        if b.starts_with(MAIN_SEPARATOR) {
             ret_path = b.to_string();
-        } else if ret_path.is_empty() || ret_path.ends_with('/') {
+        } else if ret_path.is_empty() || ret_path.ends_with(MAIN_SEPARATOR) {
             ret_path.push_str(b);
         } else {
-            ret_path.push('/');
+            ret_path.push(MAIN_SEPARATOR);
             ret_path.push_str(b);
         }
     }
@@ -131,7 +131,7 @@ fn _abspath(path_str: &str) -> Result<String, String> {
 }
 
 fn _basename<'a>(path_str: &'a str) -> &'a str {
-    let i = match path_str.rfind("/") {
+    let i = match path_str.rfind(MAIN_SEPARATOR) {
         Some(v) => v + 1,
         None => 0,
     };
@@ -139,14 +139,14 @@ fn _basename<'a>(path_str: &'a str) -> &'a str {
 }
 
 fn _dirname<'a>(path_str: &'a str) -> &'a str {
-    let i = match path_str.rfind("/") {
+    let i = match path_str.rfind(MAIN_SEPARATOR) {
         Some(v) => v + 1,
         None => 0,
     };
     let (head, _) = path_str.split_at(i);
     let head_sep = numsep!(head.len());
     if !head.is_empty() && head != head_sep {
-        head.trim_right_matches("/")
+        head.trim_right_matches(MAIN_SEPARATOR)
     } else {
         head
     }
@@ -154,7 +154,7 @@ fn _dirname<'a>(path_str: &'a str) -> &'a str {
 
 #[inline(always)]
 fn _isabs(path_str: &str) -> bool {
-    path_str.starts_with("/")
+    path_str.starts_with(MAIN_SEPARATOR)
 }
 
 fn _join(path_str: &str, path_list: &PyTuple) -> PyResult<String> {
@@ -176,12 +176,12 @@ fn _join(path_str: &str, path_list: &PyTuple) -> PyResult<String> {
         }
         let b = b.unwrap();
 
-        if b.starts_with('/') {
+        if b.starts_with(MAIN_SEPARATOR) {
             ret_path = b.to_string();
-        } else if ret_path.is_empty() || ret_path.ends_with('/') {
+        } else if ret_path.is_empty() || ret_path.ends_with(MAIN_SEPARATOR) {
             ret_path.push_str(b.as_str());
         } else {
-            ret_path.push('/');
+            ret_path.push(MAIN_SEPARATOR);
             ret_path.push_str(b.as_str());
         }
     }
@@ -193,7 +193,7 @@ fn _normpath(path_str: &str) -> Result<String, String> {
     if path_str.is_empty() {
         return Ok(".".to_string())
     }
-    let initial_slashes = path_str.starts_with('/');
+    let initial_slashes = path_str.starts_with(MAIN_SEPARATOR);
     let initial_slashes_num = if initial_slashes &&
         path_str.starts_with("//") && !path_str.starts_with("///") {
         2
@@ -244,11 +244,11 @@ fn _commonprefix(m: &Vec<&[String]>) -> Result<Vec<String>, String> {
 
 fn _relpath(path_str: &str, start: &str) -> PyResult<String> {
     let start_list: Vec<String> = _abspath(start).unwrap()
-        .split('/')
+        .split(MAIN_SEPARATOR)
         .into_iter()
         .filter(|x| !x.is_empty()).map(|x| x.to_string()).collect();
     let path_list: Vec<String> = _abspath(path_str).unwrap()
-        .split('/')
+        .split(MAIN_SEPARATOR)
         .into_iter()
         .filter(|x| !x.is_empty()).map(|x| x.to_string()).collect();
     let cprefix = _commonprefix(
@@ -267,19 +267,19 @@ fn _relpath(path_str: &str, start: &str) -> PyResult<String> {
 }
 
 fn _split(path_str: &str) -> Result<(String, String), String> {
-    let (mut head, tail) = match path_str.rfind('/') {
+    let (mut head, tail) = match path_str.rfind(MAIN_SEPARATOR) {
         Some(v) => path_str.split_at(v + 1),
         None => ("", path_str),
     };
     let head_sep = numsep!(head.len());
     if !head.is_empty() && head != head_sep {
-        head = head.trim_right_matches('/');
+        head = head.trim_right_matches(MAIN_SEPARATOR);
     }
     return Ok((head.to_string(), tail.to_string()))
 }
 
 fn _splitext(path_str: &str) -> Result<(String, String), String> {
-    let sep_index = match path_str.rfind('/') {
+    let sep_index = match path_str.rfind(MAIN_SEPARATOR) {
         Some(v) => v as i32,
         None => -1,
     };
