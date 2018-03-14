@@ -15,6 +15,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "fpath"
 version = "0.1.0"
 dependencies = [
+ "lazy_static 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "pyo3 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 

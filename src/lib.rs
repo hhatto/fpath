@@ -2,9 +2,19 @@
 
 extern crate pyo3;
 
+#[macro_use]
+extern crate lazy_static;
+
+use std::str;
 use std::collections::HashMap;
 use std::env::current_dir;
+use std::path::MAIN_SEPARATOR;
 use pyo3::prelude::*;
+
+pub const SEP: u8 = MAIN_SEPARATOR as u8;
+lazy_static! {
+    pub static ref SEP_STR: &'static str = str::from_utf8(&[SEP]).unwrap();
+}
 
 macro_rules! numsep {
     ( $x:expr ) => (
@@ -27,18 +37,16 @@ macro_rules! partition {
     }
 }
 
+#[inline(always)]
 fn _islink(path_str: &str) -> bool {
-    match std::fs::read_link(path_str) {
-        Ok(_) => true,
-        Err(_) => false,
-    }
+    std::fs::read_link(path_str).is_ok()
 }
 
 fn _joinrealpath(path_str: &str, rest: &str, seen: HashMap<String, Option<String>>) -> (String, bool) {
     let mut use_seen = seen.clone();
     let (mut ret_path, mut use_rest) = if _isabs(rest) {
         let (_head, tail) = rest.split_at(1);
-        ("/".to_string(), tail)
+        (SEP.to_string(), tail)
     } else {
         (path_str.to_string(), rest)
     };
@@ -122,16 +130,15 @@ fn _abspath(path_str: &str) -> Result<String, String> {
     }
 }
 
-fn _basename(path_str: &str) -> Result<String, String> {
+fn _basename<'a>(path_str: &'a str) -> &'a str {
     let i = match path_str.rfind("/") {
         Some(v) => v + 1,
         None => 0,
     };
-    let (_, tail) = path_str.split_at(i);
-    Ok(tail.to_string())
+    path_str.split_at(i).1
 }
 
-fn _dirname(path_str: &str) -> Result<String, String> {
+fn _dirname<'a>(path_str: &'a str) -> &'a str {
     let i = match path_str.rfind("/") {
         Some(v) => v + 1,
         None => 0,
@@ -139,12 +146,13 @@ fn _dirname(path_str: &str) -> Result<String, String> {
     let (head, _) = path_str.split_at(i);
     let head_sep = numsep!(head.len());
     if !head.is_empty() && head != head_sep {
-        Ok(head.trim_right_matches("/").to_string())
+        head.trim_right_matches("/")
     } else {
-        Ok(head.to_string())
+        head
     }
 }
 
+#[inline(always)]
 fn _isabs(path_str: &str) -> bool {
     path_str.starts_with("/")
 }
@@ -348,10 +356,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
             _ => {}
         }
         let arg_str = arg_str.unwrap();
-        match _basename(arg_str.as_str()) {
-            Ok(s) => Ok(s),
-            Err(_) => exc::OSError.into(),
-        }
+        Ok(_basename(arg_str.as_str()).to_string())
     }
 
     #[pyfn(m, "dirname")]
@@ -362,10 +367,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
             _ => {}
         }
         let arg_str = arg_str.unwrap();
-        match _dirname(arg_str.as_str()) {
-            Ok(s) => Ok(s),
-            Err(_) => exc::OSError.into(),
-        }
+        Ok(_dirname(arg_str.as_str()).to_string())
     }
 
     #[pyfn(m, "isabs")]
@@ -478,38 +480,38 @@ mod tests {
     #[test]
     fn basename() {
         let fname = "/path/to/test.txt";
-        let result_str = _basename(fname).unwrap();
+        let result_str = _basename(fname);
         assert_eq!(result_str, "test.txt");
 
         let fname = "test.txt";
-        let result_str = _basename(fname).unwrap();
+        let result_str = _basename(fname);
         assert_eq!(result_str, fname);
 
         let dpath = "/path/to/dirname/";
-        let result_str = _basename(dpath).unwrap();
+        let result_str = _basename(dpath);
         assert_eq!(result_str, "");
     }
 
     #[test]
     fn dirname() {
         let fname = "/path/to/test.txt";
-        let result_str = _dirname(fname).unwrap();
+        let result_str = _dirname(fname);
         assert_eq!(result_str, "/path/to");
 
         let fname = "/";
-        let result_str = _dirname(fname).unwrap();
+        let result_str = _dirname(fname);
         assert_eq!(result_str, "/");
 
         let fname = "//";
-        let result_str = _dirname(fname).unwrap();
+        let result_str = _dirname(fname);
         assert_eq!(result_str, "//");
 
         let fname = "path/to/test.txt";
-        let result_str = _dirname(fname).unwrap();
+        let result_str = _dirname(fname);
         assert_eq!(result_str, "path/to");
 
         let dpath = "/path/to/dirname/";
-        let result_str = _dirname(dpath).unwrap();
+        let result_str = _dirname(dpath);
         assert_eq!(result_str, "/path/to/dirname");
     }
 
