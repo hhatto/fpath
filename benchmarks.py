@@ -20,7 +20,7 @@ def bench_one_arg(arg):
         # benchmark of file system dependent
         n = N if funcname not in ("islink", "lexists", "exists", "realpath") else 10
         with Benchmarker(n, width=30) as b:
-            @b("naitive.%s" % (funcname))
+            @b("native.%s" % (funcname))
             def _(bm):
                 func = getattr(os.path, funcname)
                 for i in bm:
@@ -48,7 +48,7 @@ def bench_two_arg(arg):
             continue
         n = N
         with Benchmarker(n, width=30) as b:
-            @b("naitive.%s" % (funcname))
+            @b("native.%s" % (funcname))
             def _(bm):
                 func = getattr(os.path, funcname)
                 for i in bm:
