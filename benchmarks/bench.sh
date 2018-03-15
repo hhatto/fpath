@@ -1,5 +1,7 @@
 #!/usr/bin/env zsh
 
+printf 'methodname              %%       real[p,r]       user[p,r]      sys[p,r]\n'
+
 for funcname in "abspath" "basename" "dirname" "isabs" "islink" \
                 "exists" "lexists" "split" "splitext" "relpath" \
                 "normpath" "realpath" "join"
