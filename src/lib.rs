@@ -4,6 +4,7 @@ extern crate pyo3;
 
 #[macro_use]
 extern crate lazy_static;
+extern crate memchr;
 
 use std::str;
 use std::collections::HashMap;
@@ -24,11 +25,10 @@ macro_rules! numsep {
 
 macro_rules! partition {
     ( $x:expr, $sep:expr ) => {
-        match $x.find($sep) {
+        match memchr::memchr($sep.as_bytes()[0], $x.as_bytes()) {
             Some(i) => {
-                let (head, _tail) = $x.split_at(i);
-                let (_head, tail) = $x.split_at(i+1);
-                (head, $sep, tail)
+                let (head, tail) = $x.split_at(i+1);
+                (&head[..i], $sep, tail)
             },
             None => {
                 ($x, "", "")
@@ -131,7 +131,7 @@ fn _abspath(path_str: &str) -> Result<String, String> {
 }
 
 fn _basename<'a>(path_str: &'a str) -> &'a str {
-    let i = match path_str.rfind(MAIN_SEPARATOR) {
+    let i = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => v + 1,
         None => 0,
     };
@@ -139,7 +139,7 @@ fn _basename<'a>(path_str: &'a str) -> &'a str {
 }
 
 fn _dirname<'a>(path_str: &'a str) -> &'a str {
-    let i = match path_str.rfind(MAIN_SEPARATOR) {
+    let i = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => v + 1,
         None => 0,
     };
@@ -267,7 +267,7 @@ fn _relpath(path_str: &str, start: &str) -> PyResult<String> {
 }
 
 fn _split(path_str: &str) -> Result<(String, String), String> {
-    let (mut head, tail) = match path_str.rfind(MAIN_SEPARATOR) {
+    let (mut head, tail) = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => path_str.split_at(v + 1),
         None => ("", path_str),
     };
@@ -279,11 +279,11 @@ fn _split(path_str: &str) -> Result<(String, String), String> {
 }
 
 fn _splitext(path_str: &str) -> Result<(String, String), String> {
-    let sep_index = match path_str.rfind(MAIN_SEPARATOR) {
+    let sep_index= match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => v as i32,
         None => -1,
     };
-    let ext_index = match path_str.rfind('.') {
+    let ext_index= match memchr::memrchr('.' as u8, path_str.as_bytes()) {
         Some(v) => v as i32,
         None => -1,
     };
@@ -313,9 +313,9 @@ fn _splitext(path_str: &str) -> Result<(String, String), String> {
 fn pyobj2str(obj: &PyObject) -> Result<String, String> {
     let gil = Python::acquire_gil();
     let py = gil.python();
-    match obj.cast_as::<PyString>(py) {
-        Ok(arg) => {
-            Ok(String::from(arg.to_string_lossy()))
+    match obj.extract::<String>(py) {
+        Ok(s) => {
+            Ok(s)
         },
         Err(_) => {
             match obj.cast_as::<PyBytes>(py) {

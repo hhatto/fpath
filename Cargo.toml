@@ -9,6 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 lazy_static = "1.0"
+memchr = "2.0"
 
 [dependencies.pyo3]
 version = "0.2"
