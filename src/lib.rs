@@ -130,12 +130,14 @@ fn _abspath(path_str: &str) -> Result<String, String> {
     }
 }
 
-fn _basename<'a>(path_str: &'a str) -> &'a str {
+fn _basename(path_str: &str) -> PyObject {
     let i = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => v + 1,
         None => 0,
     };
-    path_str.split_at(i).1
+    let gil = Python::acquire_gil();
+    let py = gil.python();
+    PyString::new(py, path_str.split_at(i).1).to_object(py)
 }
 
 fn _dirname<'a>(path_str: &'a str) -> &'a str {
@@ -157,10 +159,8 @@ fn _isabs(path_str: &str) -> bool {
     path_str.starts_with(MAIN_SEPARATOR)
 }
 
-fn _join(path_str: &str, path_list: &PyTuple) -> PyResult<String> {
-    if path_list.len() < 1 {
-        return Ok(path_str.to_string())
-    }
+fn _join(path_str: &str, path_list: &PyTuple) -> PyResult<PyObject> {
+    // path_list > 0
 
     let mut is_first = true;
     let mut ret_path = String::from(path_str);
@@ -186,7 +186,9 @@ fn _join(path_str: &str, path_list: &PyTuple) -> PyResult<String> {
         }
     }
 
-    Ok(ret_path)
+    let gil = Python::acquire_gil();
+    let py = gil.python();
+    Ok(PyString::new(py, ret_path.as_str()).to_object(py))
 }
 
 fn _normpath(path_str: &str) -> String {
@@ -362,14 +364,14 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(m, "basename")]
-    pub fn basename(path_str: PyObject) -> PyResult<String> {
+    pub fn basename(path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
         let arg_str = arg_str.unwrap();
-        Ok(_basename(arg_str.as_str()).to_string())
+        Ok(_basename(arg_str.as_str()))
     }
 
     #[pyfn(m, "dirname")]
@@ -395,7 +397,11 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(m, "join", path_str, path_list="*")]
-    pub fn join(path_str: PyObject, path_list: &PyTuple) -> PyResult<String> {
+    pub fn join(path_str: PyObject, path_list: &PyTuple) -> PyResult<PyObject> {
+        if path_list.len() < 1 {
+            return Ok(path_str)
+        }
+
         let arg_str = pyobj2str(&path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
