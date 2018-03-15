@@ -118,11 +118,11 @@ pub fn _inner_join(path_str: &str, path_list: &[&str]) -> String {
 
 fn _abspath(path_str: &str) -> Result<String, String> {
     if _isabs(path_str) {
-        return _normpath(path_str)
+        return Ok(_normpath(path_str))
     }
     match current_dir() {
         Ok(c) => {
-            _normpath(c.join(path_str).to_str().unwrap())
+            Ok(_normpath(c.join(path_str).to_str().unwrap()))
         },
         Err(e) => {
             Err(format!("{}", e))
@@ -189,16 +189,16 @@ fn _join(path_str: &str, path_list: &PyTuple) -> PyResult<String> {
     Ok(ret_path)
 }
 
-fn _normpath(path_str: &str) -> Result<String, String> {
+fn _normpath(path_str: &str) -> String {
     if path_str.is_empty() {
-        return Ok(".".to_string())
+        return ".".to_string()
     }
     let initial_slashes = path_str.starts_with(MAIN_SEPARATOR);
-    let initial_slashes_num = if initial_slashes &&
+    let initial_slashes_str = if initial_slashes &&
         path_str.starts_with("//") && !path_str.starts_with("///") {
-        2
+        "//"
     } else {
-        1
+        "/"
     };
     let mut new_comps: Vec<&str> = vec![];
     for comp in path_str.split('/').into_iter() {
@@ -213,15 +213,16 @@ fn _normpath(path_str: &str) -> Result<String, String> {
             new_comps.pop();
         }
     }
+
     let new_comps_path = new_comps.join("/");
     if initial_slashes {
-        let mut head_sep = numsep!(initial_slashes_num);
+        let mut head_sep = initial_slashes_str.to_string();
         head_sep.push_str(new_comps_path.as_str());
-        Ok(head_sep)
+        head_sep
     } else if new_comps_path.is_empty() {
-        Ok(".".to_string())
+        ".".to_string()
     } else {
-        Ok(new_comps_path)
+        new_comps_path
     }
 }
 
@@ -402,6 +403,17 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         }
         let arg_str = arg_str.unwrap();
         _join(arg_str.as_str(), path_list)
+    }
+
+    #[pyfn(m, "normpath")]
+    pub fn normpath(path_str: PyObject) -> PyResult<String> {
+        let arg_str = pyobj2str(&path_str);
+        match arg_str {
+            Err(e) => return Err(exc::TypeError::new(e)),
+            _ => {}
+        }
+        let arg_str = arg_str.unwrap();
+        Ok(_normpath(arg_str.as_str()))
     }
 
     #[pyfn(m, "relpath")]

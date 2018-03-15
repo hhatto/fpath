@@ -35,6 +35,12 @@ def dirname(path):
 def isabs(path):
     return _fpath.isabs(path)
 
+def normpath(path):
+    ret = _fpath.normpath(path)
+    if type(path) == bytes:
+        return ret.encode("utf-8")
+    return ret
+
 def relpath(path, start=None):
     if not path:
         raise ValueError("no path specified")
@@ -82,6 +88,3 @@ def islink(path):
 
 def lexists(path):
     return ospath.lexists(path)
-
-def normpath(path):
-    return ospath.normpath(path)
