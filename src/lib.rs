@@ -19,7 +19,7 @@ lazy_static! {
 
 macro_rules! numsep {
     ( $x:expr ) => (
-        String::from_utf8((0..$x).map(|_| SEP).collect::<Vec<u8>>()).unwrap()
+        unsafe { String::from_utf8_unchecked((0..$x).map(|_| SEP).collect::<Vec<u8>>()) }
     )
 }
 
@@ -61,7 +61,7 @@ fn _joinrealpath(path_str: &str, rest: &str, seen: HashMap<String, Option<String
             if ret_path.is_empty() {
                 ret_path = "..".to_string();
             } else {
-                let (rp, n) = _split(ret_path.as_str()).unwrap();
+                let (rp, n) = _inner_split(ret_path.as_str()).unwrap();
                 ret_path = rp;
                 if n == ".." {
                     let rp = _inner_join(ret_path.as_str(), &["..", ".."]);
@@ -266,7 +266,7 @@ fn _relpath(path_str: &str, start: &str) -> PyResult<String> {
     Ok(_inner_join(rel_list[0], &rel_list[1..]))
 }
 
-fn _split(path_str: &str) -> Result<(String, String), String> {
+fn _inner_split(path_str: &str) -> Result<(String, String), String> {
     let (mut head, tail) = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => path_str.split_at(v + 1),
         None => ("", path_str),
@@ -276,6 +276,18 @@ fn _split(path_str: &str) -> Result<(String, String), String> {
         head = head.trim_right_matches(MAIN_SEPARATOR);
     }
     return Ok((head.to_string(), tail.to_string()))
+}
+
+fn _split<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
+    let (mut head, tail) = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
+        Some(v) => path_str.split_at(v + 1),
+        None => ("", path_str),
+    };
+    let head_sep = numsep!(head.len());
+    if !head.is_empty() && head != head_sep {
+        head = head.trim_right_matches(MAIN_SEPARATOR);
+    }
+    return Ok((head, tail))
 }
 
 fn _splitext(path_str: &str) -> Result<(String, String), String> {
@@ -389,7 +401,6 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
             _ => {}
         }
         let arg_str = arg_str.unwrap();
-
         _join(arg_str.as_str(), path_list)
     }
 
@@ -427,7 +438,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(m, "split")]
-    pub fn split(path_str: PyObject) -> PyResult<(String, String)> {
+    pub fn split(path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
@@ -435,7 +446,13 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         }
         let arg_str = arg_str.unwrap();
         match _split(arg_str.as_str()) {
-            Ok(s) => Ok(s),
+            Ok((head, tail)) => {
+                let gil = Python::acquire_gil();
+                let py = gil.python();
+                Ok(PyTuple::new(py, &[
+                        PyString::new(py, head),
+                        PyString::new(py, tail)]).as_ref(py).to_object(py))
+            },
             Err(_) => exc::OSError.into(),
         }
     }
