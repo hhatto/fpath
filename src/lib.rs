@@ -290,7 +290,7 @@ fn _split<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
     return Ok((head, tail))
 }
 
-fn _splitext(path_str: &str) -> Result<(String, String), String> {
+fn _splitext<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
     let sep_index= match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => v as i32,
         None => -1,
@@ -307,19 +307,19 @@ fn _splitext(path_str: &str) -> Result<(String, String), String> {
                 Some(c) => {
                     if c != '.' {
                         let (head, tail) = path_str.split_at(ext_index as usize);
-                        return Ok((head.to_string(), tail.to_string()))
+                        return Ok((head, tail))
                     }
                 },
                 None => {
                     let (head, tail) = path_str.split_at(ext_index as usize);
-                    return Ok((head.to_string(), tail.to_string()))
+                    return Ok((head, tail))
                 },
             };
             filename_index += 1
         }
     }
 
-    return Ok((path_str.to_string(), "".to_string()))
+    return Ok((path_str, ""))
 }
 
 fn pyobj2str(obj: &PyObject) -> Result<String, String> {
@@ -458,7 +458,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(m, "splitext")]
-    pub fn splitext(path_str: PyObject) -> PyResult<(String, String)> {
+    pub fn splitext(path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
@@ -466,7 +466,13 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         }
         let arg_str = arg_str.unwrap();
         match _splitext(arg_str.as_str()) {
-            Ok(s) => Ok(s),
+            Ok((head, tail)) => {
+                let gil = Python::acquire_gil();
+                let py = gil.python();
+                Ok(PyTuple::new(py, &[
+                        PyString::new(py, head),
+                        PyString::new(py, tail)]).as_ref(py).to_object(py))
+            },
             Err(_) => exc::OSError.into(),
         }
     }
