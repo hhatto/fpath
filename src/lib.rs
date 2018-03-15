@@ -130,14 +130,18 @@ fn _abspath(path_str: &str) -> Result<String, String> {
     }
 }
 
-fn _basename(path_str: &str) -> PyObject {
+fn _basename(path_str: &str, is_bytes: bool) -> PyObject {
     let i = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => v + 1,
         None => 0,
     };
     let gil = Python::acquire_gil();
     let py = gil.python();
-    PyString::new(py, path_str.split_at(i).1).to_object(py)
+    if is_bytes {
+        PyBytes::new(py, path_str.split_at(i).1.as_bytes()).to_object(py)
+    } else {
+        PyString::new(py, path_str.split_at(i).1).to_object(py)
+    }
 }
 
 fn _dirname<'a>(path_str: &'a str) -> &'a str {
@@ -159,7 +163,7 @@ fn _isabs(path_str: &str) -> bool {
     path_str.starts_with(MAIN_SEPARATOR)
 }
 
-fn _join(path_str: &str, path_list: &PyTuple) -> PyResult<PyObject> {
+fn _join(path_str: &str, path_list: &PyTuple, is_bytes: bool) -> PyResult<PyObject> {
     // path_list > 0
 
     let mut is_first = true;
@@ -174,7 +178,7 @@ fn _join(path_str: &str, path_list: &PyTuple) -> PyResult<PyObject> {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let b = b.unwrap();
+        let (b, _) = b.unwrap();
 
         if b.starts_with(MAIN_SEPARATOR) {
             ret_path = b.to_string();
@@ -188,7 +192,11 @@ fn _join(path_str: &str, path_list: &PyTuple) -> PyResult<PyObject> {
 
     let gil = Python::acquire_gil();
     let py = gil.python();
-    Ok(PyString::new(py, ret_path.as_str()).to_object(py))
+    if is_bytes {
+        Ok(PyBytes::new(py, ret_path.as_bytes()).to_object(py))
+    } else {
+        Ok(PyString::new(py, ret_path.as_str()).to_object(py))
+    }
 }
 
 fn _normpath(path_str: &str) -> String {
@@ -325,17 +333,17 @@ fn _splitext<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
     return Ok((path_str, ""))
 }
 
-fn pyobj2str(obj: &PyObject) -> Result<String, String> {
+fn pyobj2str(obj: &PyObject) -> Result<(String, bool), String> {
     let gil = Python::acquire_gil();
     let py = gil.python();
     match obj.extract::<String>(py) {
         Ok(s) => {
-            Ok(s)
+            Ok((s, false))
         },
         Err(_) => {
-            match obj.cast_as::<PyBytes>(py) {
+            match obj.extract::<&PyBytes>(py) {
                 Ok(arg) => {
-                    Ok(String::from_utf8(arg.data().to_vec()).unwrap())
+                    Ok((String::from_utf8(arg.data().to_vec()).unwrap(), true))
                 },
                 Err(_) => {
                     Err("invalid argument type".to_string())
@@ -355,7 +363,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let arg_str = arg_str.unwrap();
+        let (arg_str, _is_bytes) = arg_str.unwrap();
 
         match _abspath(arg_str.as_str()) {
             Ok(s) => Ok(s),
@@ -370,19 +378,25 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let arg_str = arg_str.unwrap();
-        Ok(_basename(arg_str.as_str()))
+        let (arg_str, is_bytes) = arg_str.unwrap();
+        Ok(_basename(arg_str.as_str(), is_bytes))
     }
 
     #[pyfn(m, "dirname")]
-    pub fn dirname(path_str: PyObject) -> PyResult<String> {
+    pub fn dirname(path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let arg_str = arg_str.unwrap();
-        Ok(_dirname(arg_str.as_str()).to_string())
+        let (arg_str, is_bytes) = arg_str.unwrap();
+        let gil = Python::acquire_gil();
+        let py = gil.python();
+        if is_bytes {
+            Ok(PyBytes::new(py, _dirname(arg_str.as_str()).as_bytes()).to_object(py))
+        } else {
+            Ok(PyString::new(py, _dirname(arg_str.as_str())).to_object(py))
+        }
     }
 
     #[pyfn(m, "isabs")]
@@ -392,7 +406,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let arg_str = arg_str.unwrap();
+        let (arg_str, _is_bytes) = arg_str.unwrap();
         Ok(_isabs(arg_str.as_str()))
     }
 
@@ -407,8 +421,8 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let arg_str = arg_str.unwrap();
-        _join(arg_str.as_str(), path_list)
+        let (arg_str, is_bytes) = arg_str.unwrap();
+        _join(arg_str.as_str(), path_list, is_bytes)
     }
 
     #[pyfn(m, "normpath")]
@@ -418,7 +432,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let arg_str = arg_str.unwrap();
+        let (arg_str, _is_bytes) = arg_str.unwrap();
         Ok(_normpath(arg_str.as_str()))
     }
 
@@ -429,28 +443,36 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let arg_str = arg_str.unwrap();
+        let (arg_str, _is_bytes) = arg_str.unwrap();
 
         let start_str = pyobj2str(&start);
         match start_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let start_str = start_str.unwrap();
+        let (start_str, _) = start_str.unwrap();
 
         _relpath(arg_str.as_str(), start_str.as_str())
     }
 
     #[pyfn(m, "realpath")]
-    pub fn realpath(path_str: PyObject) -> PyResult<String> {
+    pub fn realpath(path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let arg_str = arg_str.unwrap();
+        let (arg_str, is_bytes) = arg_str.unwrap();
         match _realpath(arg_str.as_str()) {
-            Ok(s) => Ok(s),
+            Ok(s) => {
+                let gil = Python::acquire_gil();
+                let py = gil.python();
+                if is_bytes {
+                    Ok(PyBytes::new(py, s.as_bytes()).to_object(py))
+                } else {
+                    Ok(PyString::new(py, s.as_str()).to_object(py))
+                }
+            },
             Err(_) => exc::OSError.into(),
         }
     }
@@ -462,14 +484,19 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let arg_str = arg_str.unwrap();
+        let (arg_str, is_bytes) = arg_str.unwrap();
         match _split(arg_str.as_str()) {
             Ok((head, tail)) => {
                 let gil = Python::acquire_gil();
                 let py = gil.python();
-                Ok(PyTuple::new(py, &[
-                        PyString::new(py, head),
-                        PyString::new(py, tail)]).as_ref(py).to_object(py))
+                let (py_head, py_tail) = if is_bytes {
+                    (PyBytes::new(py, head.as_bytes()).to_object(py),
+                     PyBytes::new(py, tail.as_bytes()).to_object(py))
+                } else {
+                    (PyString::new(py, head).to_object(py),
+                     PyString::new(py, tail).to_object(py))
+                };
+                Ok(PyTuple::new(py, &[py_head, py_tail]).as_ref(py).to_object(py))
             },
             Err(_) => exc::OSError.into(),
         }
@@ -482,14 +509,19 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let arg_str = arg_str.unwrap();
+        let (arg_str, is_bytes) = arg_str.unwrap();
         match _splitext(arg_str.as_str()) {
             Ok((head, tail)) => {
                 let gil = Python::acquire_gil();
                 let py = gil.python();
-                Ok(PyTuple::new(py, &[
-                        PyString::new(py, head),
-                        PyString::new(py, tail)]).as_ref(py).to_object(py))
+                let (py_head, py_tail) = if is_bytes {
+                    (PyBytes::new(py, head.as_bytes()).to_object(py),
+                     PyBytes::new(py, tail.as_bytes()).to_object(py))
+                } else {
+                    (PyString::new(py, head).to_object(py),
+                     PyString::new(py, tail).to_object(py))
+                };
+                Ok(PyTuple::new(py, &[py_head, py_tail]).as_ref(py).to_object(py))
             },
             Err(_) => exc::OSError.into(),
         }
@@ -502,7 +534,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
 mod tests {
     use std::env::current_dir;
     use std::collections::HashMap;
-    use ::{_abspath, _basename, _dirname, _realpath, _joinrealpath};
+    use ::{_abspath, _dirname, _realpath, _joinrealpath};
 
     #[test]
     fn abspath() {
@@ -516,21 +548,6 @@ mod tests {
         let fname = "/path/to/test.txt";
         let result_str = _abspath(fname).unwrap();
         assert_eq!(result_str, fname);
-    }
-
-    #[test]
-    fn basename() {
-        let fname = "/path/to/test.txt";
-        let result_str = _basename(fname);
-        assert_eq!(result_str, "test.txt");
-
-        let fname = "test.txt";
-        let result_str = _basename(fname);
-        assert_eq!(result_str, fname);
-
-        let dpath = "/path/to/dirname/";
-        let result_str = _basename(dpath);
-        assert_eq!(result_str, "");
     }
 
     #[test]

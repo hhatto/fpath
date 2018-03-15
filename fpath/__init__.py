@@ -8,29 +8,13 @@ def abspath(path):
         return ret.encode("utf-8")
     return ret
 
-def basename(path):
-    ret = _fpath.basename(path)
-    if type(path) == bytes:
-        return ret.encode("utf-8")
-    return ret
+basename = _fpath.basename
 
-def join(path, *paths):
-    ret = _fpath.join(path, *paths)
-    if type(path) == bytes:
-        return ret.encode("utf-8")
-    return ret
+join = _fpath.join
 
-def realpath(path):
-    ret = _fpath.realpath(path)
-    if type(path) == bytes:
-        return ret.encode("utf-8")
-    return ret
+realpath = _fpath.realpath
 
-def dirname(path):
-    ret = _fpath.dirname(path)
-    if type(path) == bytes:
-        return ret.encode("utf-8")
-    return ret
+dirname = _fpath.dirname
 
 def isabs(path):
     return _fpath.isabs(path)
@@ -55,17 +39,8 @@ def relpath(path, start=None):
         return ret.encode("utf-8")
     return ret
 
-def split(path):
-    head, tail = _fpath.split(path)
-    if type(path) == bytes:
-        return head.encode("utf-8"), tail.encode("utf-8")
-    return head, tail
-
-def splitext(path):
-    f, ext = _fpath.splitext(path)
-    if type(path) == bytes:
-        return f.encode("utf-8"), ext.encode("utf-8")
-    return f, ext
+split = _fpath.split
+splitext = _fpath.splitext
 
 # not support methods by fpath module
 def commonpath(paths):
