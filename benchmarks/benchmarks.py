@@ -4,6 +4,7 @@ import fpath
 from benchmarker import Benchmarker
 
 N = 1000 * 100
+ABS = b"home/user/path/to/file.txt"
 FILENAME = "file.txt"
 B_FILE_PATH = b"/home/user/path/to/file.txt"
 FILE_PATH = "/home/user/path/to/file.txt"
@@ -24,6 +25,7 @@ def bench_one_arg(arg):
             def _(bm):
                 func = getattr(os.path, funcname)
                 for i in bm:
+                    func(ABS)
                     func(B_FILE_PATH)
                     func(FILENAME)
                     func(FILE_PATH)
@@ -34,6 +36,7 @@ def bench_one_arg(arg):
             def _(bm):
                 func = getattr(fpath, funcname)
                 for i in bm:
+                    func(ABS)
                     func(B_FILE_PATH)
                     func(FILENAME)
                     func(FILE_PATH)
