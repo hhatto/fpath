@@ -27,7 +27,7 @@ fn _islink(path_str: &str) -> bool {
     std::fs::read_link(path_str).is_ok()
 }
 
-fn _joinrealpath(path_str: &str, rest: &str, seen: HashMap<String, Option<String>>) -> (String, bool) {
+fn _joinrealpath(path_str: &str, rest: &str, seen: &HashMap<String, Option<String>>) -> (String, bool) {
     let mut use_seen = seen.clone();
     let (mut ret_path, mut use_rest) = if _isabs(rest) {
         let (_head, tail) = rest.split_at(1);
@@ -77,7 +77,7 @@ fn _joinrealpath(path_str: &str, rest: &str, seen: HashMap<String, Option<String
         let (rp, ok) = _joinrealpath(
             ret_path.as_str(),
             indeep.to_str().unwrap(),
-            use_seen.clone(),
+            &use_seen.clone(),
         );
         ret_path = rp;
         if !ok {
@@ -223,7 +223,7 @@ fn _normpath(path_str: &str) -> String {
 
 fn _realpath(path_str: &str) -> Result<String, String> {
     let seen = HashMap::new();
-    let (ret_path, _) = _joinrealpath("", path_str, seen);
+    let (ret_path, _) = _joinrealpath("", path_str, &seen);
     _abspath(ret_path.as_str())
 }
 
@@ -238,7 +238,7 @@ fn _commonprefix(m: &Vec<&[String]>) -> Result<Vec<String>, String> {
     Ok(s1.iter().map(|x| x.to_string()).collect())
 }
 
-fn _relpath(path_str: &str, start: &str) -> PyResult<String> {
+fn _relpath(path_str: &str, start: &str) -> String {
     let start_list: Vec<String> = _abspath(start)
         .unwrap()
         .split(MAIN_SEPARATOR)
@@ -259,9 +259,9 @@ fn _relpath(path_str: &str, start: &str) -> PyResult<String> {
     let plist_list: Vec<&str> = path_list[i..].iter().map(|x| x.as_str()).collect();
     let rel_list: Vec<&str> = (0..num).map(|_| "..").chain(plist_list).collect();
     if rel_list.len() == 0 {
-        return Ok(".".to_string());
+        return ".".to_string();
     }
-    Ok(_inner_join(rel_list[0], &rel_list[1..]))
+    _inner_join(rel_list[0], &rel_list[1..])
 }
 
 fn _inner_split(path_str: &str) -> Result<(String, String), String> {
@@ -438,13 +438,13 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(m, "relpath")]
-    pub fn relpath(path_str: PyObject, start: PyObject) -> PyResult<String> {
+    pub fn relpath(path_str: PyObject, start: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let (arg_str, _is_bytes) = arg_str.unwrap();
+        let (arg_str, is_bytes) = arg_str.unwrap();
 
         let start_str = pyobj2str(&start);
         match start_str {
@@ -453,7 +453,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         }
         let (start_str, _) = start_str.unwrap();
 
-        _relpath(arg_str.as_str(), start_str.as_str())
+        str2pyobj!(_relpath(arg_str.as_str(), start_str.as_str()).as_str(), is_bytes)
     }
 
     #[pyfn(m, "realpath")]
@@ -554,7 +554,7 @@ mod tests {
     #[test]
     fn test_joinrealpath() {
         let fname = "//";
-        let ret = _joinrealpath("", fname, HashMap::new());
+        let ret = _joinrealpath("", fname, &HashMap::new());
         assert_eq!(ret, ("/".to_string(), true));
     }
 }
