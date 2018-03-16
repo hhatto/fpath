@@ -10,3 +10,7 @@ install:
 
 benchmark:
 	cd benchmarks && zsh ./bench.sh
+
+clean:
+	python setup.py clean
+	rm -rf *.egg-info dist build */__pycache__
