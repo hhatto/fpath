@@ -38,8 +38,6 @@ def relpath(path, start=None):
         ret = _fpath.relpath(path, start)
     except TypeError as err:
         raise(TypeError('"%s" does not match "%s"' % (path_type, start_type)))
-    if type(path) == bytes:
-        return ret.encode("utf-8")
     return ret
 
 # not support methods by fpath module
