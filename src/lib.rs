@@ -13,8 +13,8 @@ use std::path::{Path, MAIN_SEPARATOR};
 use pyo3::prelude::*;
 
 #[macro_use]
-mod py2str;
-use py2str::pyobj2str;
+mod utils;
+use utils::pyobj2str;
 
 pub const SEP: u8 = MAIN_SEPARATOR as u8;
 lazy_static! {
