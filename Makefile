@@ -14,3 +14,5 @@ benchmark:
 clean:
 	python setup.py clean
 	rm -rf *.egg-info dist build */__pycache__
+
+all: install test benchmark
