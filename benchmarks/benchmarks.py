@@ -11,15 +11,17 @@ FILE_PATH = "/home/user/path/to/file.txt"
 DIR_PATH = "/home/user/path/to"
 B_DIR_PATH = b"/home/user/path/to"
 SEPEND_DIR_PATH = "/home/user/path/to/"
+B_EXPAND_PATH = b"~/$foo/file.txt"
+EXPAND_PATH = "~/$foo/file.txt"
 
 def bench_one_arg(arg):
     for funcname in ("abspath", "basename", "dirname", "isabs", "islink",
                      "exists", "lexists", "split", "splitext", "relpath",
-                     "normpath", "realpath"):
+                     "normpath", "realpath", "expanduser", "expandvars"):
         if arg is not None and arg != funcname:
             continue
         # benchmark of file system dependent
-        n = N if funcname not in ("islink", "lexists", "exists", "realpath") else 10
+        n = N if funcname not in ("islink", "lexists", "exists", "realpath", "relpath") else 10
         with Benchmarker(n, width=30) as b:
             @b("native.%s" % (funcname), tag=funcname)
             def _(bm):
@@ -31,6 +33,8 @@ def bench_one_arg(arg):
                     func(FILE_PATH)
                     func(DIR_PATH)
                     func(SEPEND_DIR_PATH)
+                    func(B_EXPAND_PATH)
+                    func(EXPAND_PATH)
 
             @b("rust.%s" % (funcname), tag=funcname)
             def _(bm):
@@ -42,6 +46,8 @@ def bench_one_arg(arg):
                     func(FILE_PATH)
                     func(DIR_PATH)
                     func(SEPEND_DIR_PATH)
+                    func(B_EXPAND_PATH)
+                    func(EXPAND_PATH)
         print("=*=" * 40)
 
 
