@@ -9,4 +9,4 @@ install:
 	python setup.py install
 
 benchmark:
-	cd benchmarks && zsh ./bench.sh;  cd -
+	cd benchmarks && zsh ./bench.sh
