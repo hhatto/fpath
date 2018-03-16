@@ -2,28 +2,23 @@ import os.path as ospath
 import _fpath
 
 
-def abspath(path):
-    ret = _fpath.abspath(path)
-    if type(path) == bytes:
-        return ret.encode("utf-8")
-    return ret
-
+abspath = _fpath.abspath
 basename = _fpath.basename
-
 join = _fpath.join
-
 realpath = _fpath.realpath
-
 dirname = _fpath.dirname
+isabs = _fpath.isabs
+islink = _fpath.islink
+normpath = _fpath.normpath
+split = _fpath.split
+splitext = _fpath.splitext
 
-def isabs(path):
-    return _fpath.isabs(path)
-
-def normpath(path):
-    ret = _fpath.normpath(path)
-    if type(path) == bytes:
-        return ret.encode("utf-8")
-    return ret
+def exists(path):
+    if type(path) == int:
+        return ospath.exists(path)
+    if '\x00' in path:
+        raise ValueError("embedded null byte")
+    return _fpath.exists(path)
 
 def relpath(path, start=None):
     if not path:
@@ -39,27 +34,18 @@ def relpath(path, start=None):
         return ret.encode("utf-8")
     return ret
 
-split = _fpath.split
-splitext = _fpath.splitext
-
 # not support methods by fpath module
-def commonpath(paths):
-    return ospath.commonpath(paths)
-
-def commonprefix(m):
-    return _fpath.commonprefix(m)
-
-def exists(path):
-    return ospath.exists(path)
-
-def expanduser(path):
-    return ospath.expanduser(path)
-
-def ismount(path):
-    return ospath.ismount(path)
-
-def islink(path):
-    return ospath.islink(path)
-
-def lexists(path):
-    return ospath.lexists(path)
+commonpath = ospath.commonpath
+commonprefix = ospath.commonprefix
+expanduser = ospath.expanduser
+getatime = ospath.getatime
+getctime = ospath.getctime
+getmtime = ospath.getmtime
+getsize = ospath.getsize
+ismount = ospath.ismount
+isfile = ospath.isfile
+isdir = ospath.isdir
+lexists = ospath.lexists
+samefile = ospath.samefile
+sameopenfile = ospath.sameopenfile
+samestat = ospath.samestat

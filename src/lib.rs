@@ -9,7 +9,7 @@ extern crate memchr;
 use std::str;
 use std::collections::HashMap;
 use std::env::current_dir;
-use std::path::MAIN_SEPARATOR;
+use std::path::{Path, MAIN_SEPARATOR};
 use pyo3::prelude::*;
 
 pub const SEP: u8 = MAIN_SEPARATOR as u8;
@@ -81,18 +81,22 @@ fn _joinrealpath(path_str: &str, rest: &str, seen: HashMap<String, Option<String
                 &Some(ref v) => {
                     ret_path = v.to_string();
                     continue;
-                },
-                _ => {},
+                }
+                _ => {}
             }
-            return (_inner_join(newpath.as_str(), &[use_rest]), false)
+            return (_inner_join(newpath.as_str(), &[use_rest]), false);
         }
 
         use_seen.insert(newpath.clone(), None);
         let indeep = std::fs::read_link(newpath.clone()).unwrap();
-        let (rp, ok) = _joinrealpath(ret_path.as_str(), indeep.to_str().unwrap(), use_seen.clone());
+        let (rp, ok) = _joinrealpath(
+            ret_path.as_str(),
+            indeep.to_str().unwrap(),
+            use_seen.clone(),
+        );
         ret_path = rp;
         if !ok {
-            return (_inner_join(ret_path.as_str(), &[use_rest]), false)
+            return (_inner_join(ret_path.as_str(), &[use_rest]), false);
         }
         use_seen.insert(newpath, Some(ret_path.clone()));
     }
@@ -118,15 +122,11 @@ pub fn _inner_join(path_str: &str, path_list: &[&str]) -> String {
 
 fn _abspath(path_str: &str) -> Result<String, String> {
     if _isabs(path_str) {
-        return Ok(_normpath(path_str))
+        return Ok(_normpath(path_str));
     }
     match current_dir() {
-        Ok(c) => {
-            Ok(_normpath(c.join(path_str).to_str().unwrap()))
-        },
-        Err(e) => {
-            Err(format!("{}", e))
-        }
+        Ok(c) => Ok(_normpath(c.join(path_str).to_str().unwrap())),
+        Err(e) => Err(format!("{}", e)),
     }
 }
 
@@ -156,6 +156,10 @@ fn _dirname<'a>(path_str: &'a str) -> &'a str {
     } else {
         head
     }
+}
+
+fn _exists(path_str: &str) -> bool {
+    Path::new(path_str).exists()
 }
 
 #[inline(always)]
@@ -201,11 +205,10 @@ fn _join(path_str: &str, path_list: &PyTuple, is_bytes: bool) -> PyResult<PyObje
 
 fn _normpath(path_str: &str) -> String {
     if path_str.is_empty() {
-        return ".".to_string()
+        return ".".to_string();
     }
     let initial_slashes = path_str.starts_with(MAIN_SEPARATOR);
-    let initial_slashes_str = if initial_slashes &&
-        path_str.starts_with("//") && !path_str.starts_with("///") {
+    let initial_slashes_str = if initial_slashes && path_str.starts_with("//") && !path_str.starts_with("///") {
         "//"
     } else {
         "/"
@@ -215,10 +218,10 @@ fn _normpath(path_str: &str) -> String {
         if comp.is_empty() || comp == "." {
             continue;
         }
-        if comp != ".." ||
-           (!initial_slashes && new_comps.len() == 0) ||
-           (!new_comps.is_empty() && *new_comps.last().unwrap() == "..") {
-               new_comps.push(comp);
+        if comp != ".." || (!initial_slashes && new_comps.len() == 0)
+            || (!new_comps.is_empty() && *new_comps.last().unwrap() == "..")
+        {
+            new_comps.push(comp);
         } else if !new_comps.is_empty() {
             new_comps.pop();
         }
@@ -247,26 +250,28 @@ fn _commonprefix(m: &Vec<&[String]>) -> Result<Vec<String>, String> {
     let s2 = m.into_iter().max().unwrap();
     for (i, c) in s1.iter().enumerate() {
         if c != &s2[i] {
-            return Ok(s1[..i].iter().map(|x| x.to_string()).collect())
+            return Ok(s1[..i].iter().map(|x| x.to_string()).collect());
         }
     }
     Ok(s1.iter().map(|x| x.to_string()).collect())
 }
 
 fn _relpath(path_str: &str, start: &str) -> PyResult<String> {
-    let start_list: Vec<String> = _abspath(start).unwrap()
+    let start_list: Vec<String> = _abspath(start)
+        .unwrap()
         .split(MAIN_SEPARATOR)
         .into_iter()
-        .filter(|x| !x.is_empty()).map(|x| x.to_string()).collect();
-    let path_list: Vec<String> = _abspath(path_str).unwrap()
+        .filter(|x| !x.is_empty())
+        .map(|x| x.to_string())
+        .collect();
+    let path_list: Vec<String> = _abspath(path_str)
+        .unwrap()
         .split(MAIN_SEPARATOR)
         .into_iter()
-        .filter(|x| !x.is_empty()).map(|x| x.to_string()).collect();
-    let cprefix = _commonprefix(
-        &vec![
-            start_list.as_slice(),
-            path_list.as_slice()
-        ]).unwrap();
+        .filter(|x| !x.is_empty())
+        .map(|x| x.to_string())
+        .collect();
+    let cprefix = _commonprefix(&vec![start_list.as_slice(), path_list.as_slice()]).unwrap();
     let i = cprefix.len();
     let num = start_list.len() - i;
     let plist_list: Vec<&str> = path_list[i..].iter().map(|x| x.as_str()).collect();
@@ -286,7 +291,7 @@ fn _inner_split(path_str: &str) -> Result<(String, String), String> {
     if !head.is_empty() && head != head_sep {
         head = head.trim_right_matches(MAIN_SEPARATOR);
     }
-    return Ok((head.to_string(), tail.to_string()))
+    return Ok((head.to_string(), tail.to_string()));
 }
 
 fn _split<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
@@ -298,15 +303,15 @@ fn _split<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
     if !head.is_empty() && head != head_sep {
         head = head.trim_right_matches(MAIN_SEPARATOR);
     }
-    return Ok((head, tail))
+    return Ok((head, tail));
 }
 
 fn _splitext<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
-    let sep_index= match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
+    let sep_index = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => v as i32,
         None => -1,
     };
-    let ext_index= match memchr::memrchr('.' as u8, path_str.as_bytes()) {
+    let ext_index = match memchr::memrchr('.' as u8, path_str.as_bytes()) {
         Some(v) => v as i32,
         None => -1,
     };
@@ -318,55 +323,54 @@ fn _splitext<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
                 Some(c) => {
                     if c != '.' {
                         let (head, tail) = path_str.split_at(ext_index as usize);
-                        return Ok((head, tail))
+                        return Ok((head, tail));
                     }
-                },
+                }
                 None => {
                     let (head, tail) = path_str.split_at(ext_index as usize);
-                    return Ok((head, tail))
-                },
+                    return Ok((head, tail));
+                }
             };
             filename_index += 1
         }
     }
 
-    return Ok((path_str, ""))
+    return Ok((path_str, ""));
 }
 
 fn pyobj2str(obj: &PyObject) -> Result<(String, bool), String> {
     let gil = Python::acquire_gil();
     let py = gil.python();
     match obj.extract::<String>(py) {
-        Ok(s) => {
-            Ok((s, false))
-        },
-        Err(_) => {
-            match obj.extract::<&PyBytes>(py) {
-                Ok(arg) => {
-                    Ok((String::from_utf8(arg.data().to_vec()).unwrap(), true))
-                },
-                Err(_) => {
-                    Err("invalid argument type".to_string())
-                }
-            }
+        Ok(s) => Ok((s, false)),
+        Err(_) => match obj.extract::<&PyBytes>(py) {
+            Ok(arg) => Ok((String::from_utf8(arg.data().to_vec()).unwrap(), true)),
+            Err(_) => Err("invalid argument type".to_string()),
         },
     }
 }
 
 #[py::modinit(_fpath)]
 fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
-
     #[pyfn(m, "abspath")]
-    pub fn abspath(path_str: PyObject) -> PyResult<String> {
+    pub fn abspath(path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let (arg_str, _is_bytes) = arg_str.unwrap();
+        let (arg_str, is_bytes) = arg_str.unwrap();
 
         match _abspath(arg_str.as_str()) {
-            Ok(s) => Ok(s),
+            Ok(s) => {
+                let gil = Python::acquire_gil();
+                let py = gil.python();
+                if is_bytes {
+                    Ok(PyBytes::new(py, s.as_bytes()).to_object(py))
+                } else {
+                    Ok(PyString::new(py, s.as_str()).to_object(py))
+                }
+            }
             Err(_) => exc::OSError.into(),
         }
     }
@@ -399,6 +403,33 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         }
     }
 
+    #[pyfn(m, "exists")]
+    pub fn exists(path_str: PyObject) -> PyResult<bool> {
+        let arg_str = pyobj2str(&path_str);
+        // TODO: from file descriptor
+        //let arg_str = match arg_str {
+        //    Err(e) => {
+        //        // for file descriptor argument
+        //        let gil = Python::acquire_gil();
+        //        let py = gil.python();
+        //        match path_str.extract::<i32>(py) {
+        //            Ok(fd) => {
+        //                let f = unsafe { fs::File::from_raw_fd(fd) };
+        //                Ok(f.exists())
+        //            }
+        //            Err(_) => Err(exc::TypeError::new(e)),
+        //        }
+        //    }
+        //    Ok(s) => Ok(s.0)
+        //};
+        match arg_str {
+            Err(e) => return Err(exc::TypeError::new(e)),
+            _ => {}
+        }
+        let (arg_str, _) = arg_str.unwrap();
+        Ok(_exists(arg_str.as_str()))
+    }
+
     #[pyfn(m, "isabs")]
     pub fn isabs(path_str: PyObject) -> PyResult<bool> {
         let arg_str = pyobj2str(&path_str);
@@ -410,10 +441,21 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         Ok(_isabs(arg_str.as_str()))
     }
 
-    #[pyfn(m, "join", path_str, path_list="*")]
+    #[pyfn(m, "islink")]
+    pub fn islink(path_str: PyObject) -> PyResult<bool> {
+        let arg_str = pyobj2str(&path_str);
+        match arg_str {
+            Err(e) => return Err(exc::TypeError::new(e)),
+            _ => {}
+        }
+        let (arg_str, _is_bytes) = arg_str.unwrap();
+        Ok(_islink(arg_str.as_str()))
+    }
+
+    #[pyfn(m, "join", path_str, path_list = "*")]
     pub fn join(path_str: PyObject, path_list: &PyTuple) -> PyResult<PyObject> {
         if path_list.len() < 1 {
-            return Ok(path_str)
+            return Ok(path_str);
         }
 
         let arg_str = pyobj2str(&path_str);
@@ -426,14 +468,21 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(m, "normpath")]
-    pub fn normpath(path_str: PyObject) -> PyResult<String> {
+    pub fn normpath(path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let (arg_str, _is_bytes) = arg_str.unwrap();
-        Ok(_normpath(arg_str.as_str()))
+        let (arg_str, is_bytes) = arg_str.unwrap();
+        let ret_str = _normpath(arg_str.as_str());
+        let gil = Python::acquire_gil();
+        let py = gil.python();
+        if is_bytes {
+            Ok(PyBytes::new(py, ret_str.as_bytes()).to_object(py))
+        } else {
+            Ok(PyString::new(py, ret_str.as_str()).to_object(py))
+        }
     }
 
     #[pyfn(m, "relpath")]
@@ -472,8 +521,8 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
                 } else {
                     Ok(PyString::new(py, s.as_str()).to_object(py))
                 }
-            },
-            Err(_) => exc::OSError.into(),
+            }
+            Err(e) => Err(exc::OSError::new(e)),
         }
     }
 
@@ -490,14 +539,18 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
                 let gil = Python::acquire_gil();
                 let py = gil.python();
                 let (py_head, py_tail) = if is_bytes {
-                    (PyBytes::new(py, head.as_bytes()).to_object(py),
-                     PyBytes::new(py, tail.as_bytes()).to_object(py))
+                    (
+                        PyBytes::new(py, head.as_bytes()).to_object(py),
+                        PyBytes::new(py, tail.as_bytes()).to_object(py),
+                    )
                 } else {
-                    (PyString::new(py, head).to_object(py),
-                     PyString::new(py, tail).to_object(py))
+                    (
+                        PyString::new(py, head).to_object(py),
+                        PyString::new(py, tail).to_object(py),
+                    )
                 };
-                Ok(PyTuple::new(py, &[py_head, py_tail]).as_ref(py).to_object(py))
-            },
+                Ok(PyTuple::new(py, &[py_head, py_tail]).to_object(py))
+            }
             Err(_) => exc::OSError.into(),
         }
     }
@@ -515,14 +568,18 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
                 let gil = Python::acquire_gil();
                 let py = gil.python();
                 let (py_head, py_tail) = if is_bytes {
-                    (PyBytes::new(py, head.as_bytes()).to_object(py),
-                     PyBytes::new(py, tail.as_bytes()).to_object(py))
+                    (
+                        PyBytes::new(py, head.as_bytes()).to_object(py),
+                        PyBytes::new(py, tail.as_bytes()).to_object(py),
+                    )
                 } else {
-                    (PyString::new(py, head).to_object(py),
-                     PyString::new(py, tail).to_object(py))
+                    (
+                        PyString::new(py, head).to_object(py),
+                        PyString::new(py, tail).to_object(py),
+                    )
                 };
-                Ok(PyTuple::new(py, &[py_head, py_tail]).as_ref(py).to_object(py))
-            },
+                Ok(PyTuple::new(py, &[py_head, py_tail]).to_object(py))
+            }
             Err(_) => exc::OSError.into(),
         }
     }
@@ -534,7 +591,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
 mod tests {
     use std::env::current_dir;
     use std::collections::HashMap;
-    use ::{_abspath, _dirname, _realpath, _joinrealpath};
+    use {_abspath, _dirname, _joinrealpath, _realpath};
 
     #[test]
     fn abspath() {
