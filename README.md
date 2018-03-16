@@ -19,6 +19,23 @@ $ rustup default nightly
 $ pip install --upgrade git+https://github.com/hhatto/fpath
 ```
 
+## Usage
+
+```python
+>>> import os.path
+>>> import fpath
+>>> os.path.abspath("path/to/file")
+'/home/user/path/to/file'
+>>> fpath.abspath("path/to/file")
+'/home/user/path/to/file'
+>>> import timeit
+>>> timeit.timeit('import os.path;os.path.abspath("path/to/file")', number=1000*10)
+0.20972810598323122
+>>> timeit.timeit('import fpath;fpath.abspath("path/to/file")', number=1000*10)
+0.12387347500771284
+>>>
+```
+
 ## Benchmark
 
 ```
