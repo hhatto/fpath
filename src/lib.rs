@@ -12,6 +12,9 @@ use std::env::current_dir;
 use std::path::{Path, MAIN_SEPARATOR};
 use pyo3::prelude::*;
 
+mod py2str;
+use py2str::pyobj2str;
+
 pub const SEP: u8 = MAIN_SEPARATOR as u8;
 lazy_static! {
     pub static ref SEP_STR: &'static str = str::from_utf8(&[SEP]).unwrap();
@@ -337,33 +340,6 @@ fn _splitext<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
 
     return Ok((path_str, ""));
 }
-
-fn pyobj2str(obj: &PyObject) -> Result<(String, bool), String> {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    match obj.extract::<String>(py) {
-        Ok(s) => Ok((s, false)),
-        Err(_) => match obj.extract::<&PyBytes>(py) {
-            Ok(arg) => Ok((String::from_utf8(arg.data().to_vec()).unwrap(), true)),
-            Err(_) => pypathlike2str(obj),
-        },
-    }
-}
-
-fn pypathlike2str(obj: &PyObject) -> Result<(String, bool), String> {
-    let gil = Python::acquire_gil();
-    let py = gil.python();
-    match obj.getattr(py, "__fspath__") {
-        Ok(func) => {
-            match func.call0(py) {
-                Ok(o) => pyobj2str(&o),
-                Err(_) => Err("not PathLike object".to_string()),
-            }
-        },
-        Err(_) => Err("not PathLike object".to_string()),
-    }
-}
-
 
 #[py::modinit(_fpath)]
 fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
