@@ -185,7 +185,10 @@ fn _join(path_str: &str, path_list: &PyTuple, is_bytes: bool) -> PyResult<PyObje
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
-        let (b, _) = b.unwrap();
+        let (b, b_is_bytes) = b.unwrap();
+        if is_bytes != b_is_bytes {
+            return Err(exc::TypeError::new("Can't mix strings and bytes in path components"));
+        }
 
         if b.starts_with(MAIN_SEPARATOR) {
             ret_path = b.to_string();

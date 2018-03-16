@@ -1,3 +1,4 @@
+import os
 import os.path as ospath
 import _fpath
 
@@ -23,13 +24,20 @@ def exists(path):
 def relpath(path, start=None):
     if not path:
         raise ValueError("no path specified")
-    if type(path) is str and (start is not None and type(start) is not str):
-        raise(TypeError("must be str or None, not bytes"))
-    elif type(path) is bytes and (start is not None and type(start) is not bytes):
-        raise(TypeError("a bytes-like object is required, not 'str"))
+    path_type = type(path)
+    start_type = type(start)
+    if path_type is str and (start is not None and start_type is bytes):
+        raise(TypeError("Can't mix strings and bytes in path components"))
+    elif path_type is bytes and (start is not None and start_type is str):
+        raise(TypeError("Can't mix strings and bytes in path components"))
     if start is None:
         start = "."
-    ret = _fpath.relpath(path, start)
+    else:
+        os.fspath(start)
+    try:
+        ret = _fpath.relpath(path, start)
+    except TypeError as err:
+        raise(TypeError('"%s" does not match "%s"' % (path_type, start_type)))
     if type(path) == bytes:
         return ret.encode("utf-8")
     return ret
@@ -37,6 +45,14 @@ def relpath(path, start=None):
 # not support methods by fpath module
 commonpath = ospath.commonpath
 commonprefix = ospath.commonprefix
+curdir = ospath.curdir
+pardir = ospath.pardir
+extsep = ospath.extsep
+sep = ospath.sep
+pathsep = ospath.pathsep
+defpath = ospath.defpath
+altsep = ospath.altsep
+devnull = ospath.devnull
 expanduser = ospath.expanduser
 expandvars = ospath.expandvars
 getatime = ospath.getatime

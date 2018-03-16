@@ -7,7 +7,10 @@ import fpath as posixpath
 import unittest
 import warnings
 from fpath import realpath, abspath, dirname, basename
-from test import support, test_genericpath
+from test import support
+import sys
+sys.path.insert(0, ".")
+import test_genericpath
 
 try:
     import posix
