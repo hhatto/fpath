@@ -5,12 +5,14 @@ extern crate pyo3;
 #[macro_use]
 extern crate lazy_static;
 extern crate memchr;
+extern crate users;
 
-use std::str;
+use std::{env, str};
 use std::collections::HashMap;
 use std::env::current_dir;
 use std::path::{Path, MAIN_SEPARATOR};
 use pyo3::prelude::*;
+use users::os::unix::UserExt;
 
 #[macro_use]
 mod utils;
@@ -145,6 +147,41 @@ fn _dirname<'a>(path_str: &'a str) -> &'a str {
 
 fn _exists(path_str: &str) -> bool {
     Path::new(path_str).exists()
+}
+
+fn _expanduser(path_str: &str) -> String {
+    let i = match memchr::memchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
+        Some(v) => v,
+        None => path_str.len(),
+    };
+
+    let userhome: String = if i == 1 {
+        match env::var("HOME") {
+            Ok(v) => v,
+            Err(_) => {
+                match users::get_user_by_uid(users::get_current_uid() as u32) {
+                    Some(u) => u.home_dir().to_str().unwrap().to_string(),
+                    None => panic!("not reached"),
+                }
+            }
+        }
+    } else {
+        let name = str::from_utf8(&path_str.as_bytes()[1..i]).unwrap();
+        match users::get_user_by_name(name) {
+            Some(u) => u.home_dir().to_str().unwrap().to_string(),
+            None => path_str.to_string(),
+        }
+    };
+
+    let mut ret_userhome = userhome.trim_right_matches(MAIN_SEPARATOR).to_string();
+    let strip_path_str = str::from_utf8(&path_str.as_bytes()[i..]).unwrap();
+    ret_userhome.push_str(strip_path_str);
+
+    if ret_userhome.is_empty() {
+        MAIN_SEPARATOR.to_string()
+    } else {
+        ret_userhome
+    }
 }
 
 #[inline(always)]
@@ -386,6 +423,22 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         }
         let (arg_str, _) = arg_str.unwrap();
         Ok(_exists(arg_str.as_str()))
+    }
+
+    #[pyfn(m, "expanduser")]
+    pub fn expanduser(path_str: PyObject) -> PyResult<PyObject> {
+        let arg_str = pyobj2str(&path_str);
+        match arg_str {
+            Err(e) => return Err(exc::TypeError::new(e)),
+            _ => {}
+        }
+        let (arg_str, is_bytes) = arg_str.unwrap();
+        if !arg_str.starts_with("~") {
+            return str2pyobj!(arg_str.as_str(), is_bytes);
+        }
+
+        let ret_str = _expanduser(arg_str.as_str());
+        str2pyobj!(ret_str.as_str(), is_bytes)
     }
 
     #[pyfn(m, "isabs")]
