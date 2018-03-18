@@ -21,7 +21,7 @@ def bench_one_arg(arg):
         if arg is not None and arg != funcname:
             continue
         # benchmark of file system dependent
-        n = N if funcname not in ("islink", "lexists", "exists", "realpath", "relpath") else 10
+        n = N if funcname not in ("islink", "lexists", "exists", "realpath", "relpath") else 50
         with Benchmarker(n, width=30) as b:
             @b("native.%s" % (funcname), tag=funcname)
             def _(bm):
