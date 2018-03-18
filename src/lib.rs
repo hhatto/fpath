@@ -2,10 +2,9 @@
 
 extern crate pyo3;
 
-#[macro_use]
-extern crate lazy_static;
 extern crate memchr;
 extern crate users;
+extern crate shellexpand;
 
 use std::{env, str};
 use std::collections::HashMap;
@@ -18,10 +17,7 @@ use users::os::unix::UserExt;
 mod utils;
 use utils::pyobj2str;
 
-pub const SEP: u8 = MAIN_SEPARATOR as u8;
-lazy_static! {
-    pub static ref SEP_STR: &'static str = str::from_utf8(&[SEP]).unwrap();
-}
+const SEP: u8 = MAIN_SEPARATOR as u8;
 
 
 #[inline(always)]
@@ -149,6 +145,7 @@ fn _exists(path_str: &str) -> bool {
     Path::new(path_str).exists()
 }
 
+// NOTE: use shellexpand::tilde?
 fn _expanduser(path_str: &str) -> String {
     let i = match memchr::memchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => v,
@@ -181,6 +178,13 @@ fn _expanduser(path_str: &str) -> String {
         MAIN_SEPARATOR.to_string()
     } else {
         ret_userhome
+    }
+}
+
+fn _expandvars(path_str: &str) -> String {
+    match shellexpand::env(path_str) {
+        Ok(v) => v.into(),
+        Err(_) => path_str.to_string(),
     }
 }
 
@@ -438,6 +442,22 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         }
 
         let ret_str = _expanduser(arg_str.as_str());
+        str2pyobj!(ret_str.as_str(), is_bytes)
+    }
+
+    #[pyfn(m, "expandvars")]
+    pub fn expandvars(path_str: PyObject) -> PyResult<PyObject> {
+        let arg_str = pyobj2str(&path_str);
+        match arg_str {
+            Err(e) => return Err(exc::TypeError::new(e)),
+            _ => {}
+        }
+        let (arg_str, is_bytes) = arg_str.unwrap();
+        if memchr::memchr(b'$', arg_str.as_bytes()).is_none() {
+            return str2pyobj!(arg_str.as_str(), is_bytes);
+        }
+
+        let ret_str = _expandvars(arg_str.as_str());
         str2pyobj!(ret_str.as_str(), is_bytes)
     }
 
