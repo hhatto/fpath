@@ -4,6 +4,7 @@ Python's os.path module written in Rust
 
 ## Requirements
 
+* Python3
 * [setuptools-rust](https://github.com/PyO3/setuptools-rust)
 * Nightly Rust
 
