@@ -1,0 +1,18 @@
+language: python
+
+python:
+    - "3.6"
+
+before_install:
+    - pip install setuptools_rust benchmarker
+    - curl https://sh.rustup.rs -sSf | sh
+    - rustup default nightly
+
+install:
+    - make install
+
+script:
+    - make test
+
+after_success:
+    - make benchmark
