@@ -108,7 +108,7 @@ fn _abspath(path_str: &str) -> Result<String, String> {
         return Ok(_normpath(path_str));
     }
     match current_dir() {
-        Ok(c) => Ok(_normpath(c.join(path_str).to_str().unwrap())),
+        Ok(c) => Ok(_normpath(c.join(path_str).to_string_lossy().into_owned().as_str())),
         Err(e) => Err(format!("{}", e)),
     }
 }
