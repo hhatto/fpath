@@ -4,6 +4,7 @@ python:
     - "3.6"
 
 before_install:
+    - apt-get install zsh
     - pip install setuptools_rust benchmarker
     - curl https://sh.rustup.rs -sSf | sh -s -- -y
     - export PATH="$PATH:$HOME/.cargo/bin"
