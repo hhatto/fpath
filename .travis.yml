@@ -5,7 +5,7 @@ python:
 
 before_install:
     - pip install setuptools_rust benchmarker
-    - curl https://sh.rustup.rs -sSf | sh
+    - curl https://sh.rustup.rs -sSf | sh -s -- -y
     - rustup default nightly
 
 install:
