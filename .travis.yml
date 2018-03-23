@@ -10,10 +10,10 @@ before_install:
     - rustup default nightly
 
 install:
-    - make install
+    - make install-pip-verbose
 
 script:
-    - make test
+    - make test-verbose
 
 after_success:
     - make benchmark
