@@ -6,8 +6,8 @@ python:
 before_install:
     - pip install setuptools_rust benchmarker
     - curl https://sh.rustup.rs -sSf | sh -s -- -y
-    - rustup default nightly
     - export PATH="$PATH:$HOME/.cargo/bin"
+    - rustup default nightly
 
 install:
     - make install
