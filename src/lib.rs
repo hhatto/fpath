@@ -12,6 +12,7 @@ use std::env::current_dir;
 use std::path::{Path, MAIN_SEPARATOR};
 use pyo3::prelude::*;
 use users::os::unix::UserExt;
+use pyo3::py::modinit as pymodinit;
 
 #[macro_use]
 mod utils;
@@ -361,7 +362,7 @@ fn _splitext<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
     return Ok((path_str, ""));
 }
 
-#[py::modinit(_fpath)]
+#[pymodinit(_fpath)]
 fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
     #[pyfn(m, "abspath")]
     pub fn abspath(path_str: PyObject) -> PyResult<PyObject> {
