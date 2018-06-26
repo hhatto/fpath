@@ -114,17 +114,15 @@ fn _abspath(path_str: &str) -> Result<String, String> {
     }
 }
 
-fn _basename(path_str: &str, is_bytes: bool) -> PyObject {
+fn _basename(py: &Python, path_str: &str, is_bytes: bool) -> PyObject {
     let i = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => v + 1,
         None => 0,
     };
-    let gil = Python::acquire_gil();
-    let py = gil.python();
     if is_bytes {
-        PyBytes::new(py, path_str.split_at(i).1.as_bytes()).to_object(py)
+        PyBytes::new(*py, path_str.split_at(i).1.as_bytes()).to_object(*py)
     } else {
-        PyString::new(py, path_str.split_at(i).1).to_object(py)
+        PyString::new(*py, path_str.split_at(i).1).to_object(*py)
     }
 }
 
@@ -194,7 +192,7 @@ fn _isabs(path_str: &str) -> bool {
     path_str.starts_with(MAIN_SEPARATOR)
 }
 
-fn _join(path_str: &str, path_list: &PyTuple, is_bytes: bool) -> PyResult<PyObject> {
+fn _join(py: &Python, path_str: &str, path_list: &PyTuple, is_bytes: bool) -> PyResult<PyObject> {
     // path_list > 0
 
     let mut is_first = true;
@@ -204,7 +202,7 @@ fn _join(path_str: &str, path_list: &PyTuple, is_bytes: bool) -> PyResult<PyObje
             is_first = false;
             continue;
         }
-        let b = pyobj2str(x);
+        let b = pyobj2str(py, x);
         match b {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
@@ -224,7 +222,7 @@ fn _join(path_str: &str, path_list: &PyTuple, is_bytes: bool) -> PyResult<PyObje
         }
     }
 
-    str2pyobj!(ret_path.as_str(), is_bytes)
+    str2pyobj!(*py, ret_path.as_str(), is_bytes)
 }
 
 fn _normpath(path_str: &str) -> String {
@@ -365,8 +363,8 @@ fn _splitext<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
 #[pymodinit(_fpath)]
 fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
     #[pyfn(m, "abspath")]
-    pub fn abspath(path_str: PyObject) -> PyResult<PyObject> {
-        let arg_str = pyobj2str(&path_str);
+    pub fn abspath(py: Python, path_str: PyObject) -> PyResult<PyObject> {
+        let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
@@ -375,37 +373,37 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
 
         match _abspath(arg_str.as_str()) {
             Ok(s) => {
-                str2pyobj!(s.as_str(), is_bytes)
+                str2pyobj!(py, s.as_str(), is_bytes)
             }
             Err(_) => exc::OSError.into(),
         }
     }
 
     #[pyfn(m, "basename")]
-    pub fn basename(path_str: PyObject) -> PyResult<PyObject> {
-        let arg_str = pyobj2str(&path_str);
+    pub fn basename(py: Python, path_str: PyObject) -> PyResult<PyObject> {
+        let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
-        Ok(_basename(arg_str.as_str(), is_bytes))
+        Ok(_basename(&py, arg_str.as_str(), is_bytes))
     }
 
     #[pyfn(m, "dirname")]
-    pub fn dirname(path_str: PyObject) -> PyResult<PyObject> {
-        let arg_str = pyobj2str(&path_str);
+    pub fn dirname(py: Python, path_str: PyObject) -> PyResult<PyObject> {
+        let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
-        str2pyobj!(_dirname(arg_str.as_str()), is_bytes)
+        str2pyobj!(py, _dirname(arg_str.as_str()), is_bytes)
     }
 
     #[pyfn(m, "exists")]
-    pub fn exists(path_str: PyObject) -> PyResult<bool> {
-        let arg_str = pyobj2str(&path_str);
+    pub fn exists(py: Python, path_str: PyObject) -> PyResult<bool> {
+        let arg_str = pyobj2str(&py, &path_str);
         // TODO: from file descriptor
         //let arg_str = match arg_str {
         //    Err(e) => {
@@ -431,40 +429,40 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(m, "expanduser")]
-    pub fn expanduser(path_str: PyObject) -> PyResult<PyObject> {
-        let arg_str = pyobj2str(&path_str);
+    pub fn expanduser(py: Python, path_str: PyObject) -> PyResult<PyObject> {
+        let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
         if !arg_str.starts_with("~") {
-            return str2pyobj!(arg_str.as_str(), is_bytes);
+            return str2pyobj!(py, arg_str.as_str(), is_bytes);
         }
 
         let ret_str = _expanduser(arg_str.as_str());
-        str2pyobj!(ret_str.as_str(), is_bytes)
+        str2pyobj!(py, ret_str.as_str(), is_bytes)
     }
 
     #[pyfn(m, "expandvars")]
-    pub fn expandvars(path_str: PyObject) -> PyResult<PyObject> {
-        let arg_str = pyobj2str(&path_str);
+    pub fn expandvars(py: Python, path_str: PyObject) -> PyResult<PyObject> {
+        let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
         if memchr::memchr(b'$', arg_str.as_bytes()).is_none() {
-            return str2pyobj!(arg_str.as_str(), is_bytes);
+            return str2pyobj!(py, arg_str.as_str(), is_bytes);
         }
 
         let ret_str = _expandvars(arg_str.as_str());
-        str2pyobj!(ret_str.as_str(), is_bytes)
+        str2pyobj!(py, ret_str.as_str(), is_bytes)
     }
 
     #[pyfn(m, "isabs")]
-    pub fn isabs(path_str: PyObject) -> PyResult<bool> {
-        let arg_str = pyobj2str(&path_str);
+    pub fn isabs(py: Python, path_str: PyObject) -> PyResult<bool> {
+        let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
@@ -474,8 +472,8 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(m, "islink")]
-    pub fn islink(path_str: PyObject) -> PyResult<bool> {
-        let arg_str = pyobj2str(&path_str);
+    pub fn islink(py: Python, path_str: PyObject) -> PyResult<bool> {
+        let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
@@ -485,89 +483,89 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(m, "join", path_str, path_list = "*")]
-    pub fn join(path_str: PyObject, path_list: &PyTuple) -> PyResult<PyObject> {
+    pub fn join(py: Python, path_str: PyObject, path_list: &PyTuple) -> PyResult<PyObject> {
         if path_list.len() < 1 {
             return Ok(path_str);
         }
 
-        let arg_str = pyobj2str(&path_str);
+        let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
-        _join(arg_str.as_str(), path_list, is_bytes)
+        _join(&py, arg_str.as_str(), path_list, is_bytes)
     }
 
     #[pyfn(m, "normpath")]
-    pub fn normpath(path_str: PyObject) -> PyResult<PyObject> {
-        let arg_str = pyobj2str(&path_str);
+    pub fn normpath(py: Python, path_str: PyObject) -> PyResult<PyObject> {
+        let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
         let ret_str = _normpath(arg_str.as_str());
-        str2pyobj!(ret_str.as_str(), is_bytes)
+        str2pyobj!(py, ret_str.as_str(), is_bytes)
     }
 
     #[pyfn(m, "relpath")]
-    pub fn relpath(path_str: PyObject, start: PyObject) -> PyResult<PyObject> {
-        let arg_str = pyobj2str(&path_str);
+    pub fn relpath(py: Python, path_str: PyObject, start: PyObject) -> PyResult<PyObject> {
+        let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
 
-        let start_str = pyobj2str(&start);
+        let start_str = pyobj2str(&py, &start);
         match start_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
         let (start_str, _) = start_str.unwrap();
 
-        str2pyobj!(_relpath(arg_str.as_str(), start_str.as_str()).as_str(), is_bytes)
+        str2pyobj!(py, _relpath(arg_str.as_str(), start_str.as_str()).as_str(), is_bytes)
     }
 
     #[pyfn(m, "realpath")]
-    pub fn realpath(path_str: PyObject) -> PyResult<PyObject> {
-        let arg_str = pyobj2str(&path_str);
+    pub fn realpath(py: Python, path_str: PyObject) -> PyResult<PyObject> {
+        let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
         match _realpath(arg_str.as_str()) {
-            Ok(s) => str2pyobj!(s.as_str(), is_bytes),
+            Ok(s) => str2pyobj!(py, s.as_str(), is_bytes),
             Err(e) => Err(exc::OSError::new(e)),
         }
     }
 
     #[pyfn(m, "split")]
-    pub fn split(path_str: PyObject) -> PyResult<PyObject> {
-        let arg_str = pyobj2str(&path_str);
+    pub fn split(py: Python, path_str: PyObject) -> PyResult<PyObject> {
+        let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
         match _split(arg_str.as_str()) {
-            Ok((head, tail)) => tuplestr2pyobj!(head, tail, is_bytes),
+            Ok((head, tail)) => tuplestr2pyobj!(py, head, tail, is_bytes),
             Err(_) => exc::OSError.into(),
         }
     }
 
     #[pyfn(m, "splitext")]
-    pub fn splitext(path_str: PyObject) -> PyResult<PyObject> {
-        let arg_str = pyobj2str(&path_str);
+    pub fn splitext(py: Python, path_str: PyObject) -> PyResult<PyObject> {
+        let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exc::TypeError::new(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
         match _splitext(arg_str.as_str()) {
-            Ok((head, tail)) => tuplestr2pyobj!(head, tail, is_bytes),
+            Ok((head, tail)) => tuplestr2pyobj!(py, head, tail, is_bytes),
             Err(_) => exc::OSError.into(),
         }
     }

@@ -17,7 +17,7 @@ splitext = _fpath.splitext
 def exists(path):
     if type(path) == int:
         return ospath.exists(path)
-    if '\x00' in path:
+    if (type(path) is bytes and b'\x00' in path) or (type(path) is str and '\x00' in path):
         raise ValueError("embedded null byte")
     return _fpath.exists(path)
 
