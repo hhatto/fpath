@@ -13,6 +13,9 @@ islink = _fpath.islink
 normpath = _fpath.normpath
 split = _fpath.split
 splitext = _fpath.splitext
+expanduser = _fpath.expanduser
+expandvars = _fpath.expandvars
+
 
 def exists(path):
     if type(path) == int:
@@ -20,6 +23,7 @@ def exists(path):
     if (type(path) is bytes and b'\x00' in path) or (type(path) is str and '\x00' in path):
         raise ValueError("embedded null byte")
     return _fpath.exists(path)
+
 
 def relpath(path, start=None):
     if not path:
@@ -40,6 +44,7 @@ def relpath(path, start=None):
         raise(TypeError('"%s" does not match "%s"' % (path_type, start_type)))
     return ret
 
+
 # not support methods by fpath module
 commonpath = ospath.commonpath
 commonprefix = ospath.commonprefix
@@ -51,8 +56,6 @@ pathsep = ospath.pathsep
 defpath = ospath.defpath
 altsep = ospath.altsep
 devnull = ospath.devnull
-expanduser = _fpath.expanduser
-expandvars = _fpath.expandvars
 getatime = ospath.getatime
 getctime = ospath.getctime
 getmtime = ospath.getmtime
