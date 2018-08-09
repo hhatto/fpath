@@ -1,5 +1,6 @@
-#![feature(proc_macro, specialization)]
+#![feature(use_extern_macros, specialization)]
 
+#[macro_use]
 extern crate pyo3;
 
 extern crate memchr;
@@ -12,7 +13,6 @@ use std::env::current_dir;
 use std::path::{Path, MAIN_SEPARATOR};
 use pyo3::prelude::*;
 use users::os::unix::UserExt;
-use pyo3::py::modinit as pymodinit;
 
 #[macro_use]
 mod utils;
@@ -193,15 +193,8 @@ fn _isabs(path_str: &str) -> bool {
 }
 
 fn _join(py: &Python, path_str: &str, path_list: &PyTuple, is_bytes: bool) -> PyResult<PyObject> {
-    // path_list > 0
-
-    let mut is_first = true;
     let mut ret_path = String::from(path_str);
     for x in path_list.as_slice() {
-        if is_first {
-            is_first = false;
-            continue;
-        }
         let b = pyobj2str(py, x);
         match b {
             Err(e) => return Err(exc::TypeError::new(e)),
@@ -361,8 +354,9 @@ fn _splitext<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
 }
 
 #[pymodinit(_fpath)]
-fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
-    #[pyfn(m, "abspath")]
+fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
+
+    #[pyfunction(m, "abspath")]
     pub fn abspath(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
@@ -379,7 +373,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         }
     }
 
-    #[pyfn(m, "basename")]
+    #[pyfunction(m, "basename")]
     pub fn basename(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
@@ -390,7 +384,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         Ok(_basename(&py, arg_str.as_str(), is_bytes))
     }
 
-    #[pyfn(m, "dirname")]
+    #[pyfunction(m, "dirname")]
     pub fn dirname(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
@@ -401,7 +395,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         str2pyobj!(py, _dirname(arg_str.as_str()), is_bytes)
     }
 
-    #[pyfn(m, "exists")]
+    #[pyfunction(m, "exists")]
     pub fn exists(py: Python, path_str: PyObject) -> PyResult<bool> {
         let arg_str = pyobj2str(&py, &path_str);
         // TODO: from file descriptor
@@ -428,7 +422,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         Ok(_exists(arg_str.as_str()))
     }
 
-    #[pyfn(m, "expanduser")]
+    #[pyfunction(m, "expanduser")]
     pub fn expanduser(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
@@ -444,7 +438,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         str2pyobj!(py, ret_str.as_str(), is_bytes)
     }
 
-    #[pyfn(m, "expandvars")]
+    #[pyfunction(m, "expandvars")]
     pub fn expandvars(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
@@ -460,7 +454,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         str2pyobj!(py, ret_str.as_str(), is_bytes)
     }
 
-    #[pyfn(m, "isabs")]
+    #[pyfunction(m, "isabs")]
     pub fn isabs(py: Python, path_str: PyObject) -> PyResult<bool> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
@@ -471,7 +465,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         Ok(_isabs(arg_str.as_str()))
     }
 
-    #[pyfn(m, "islink")]
+    #[pyfunction(m, "islink")]
     pub fn islink(py: Python, path_str: PyObject) -> PyResult<bool> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
@@ -482,9 +476,9 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         Ok(_islink(arg_str.as_str()))
     }
 
-    #[pyfn(m, "join", path_str, path_list = "*")]
-    pub fn join(py: Python, path_str: PyObject, path_list: &PyTuple) -> PyResult<PyObject> {
-        if path_list.len() < 1 {
+    #[pyfunction(args(path_str, args="*"))]
+    pub fn join(py: Python, path_str: PyObject, args: &PyTuple) -> PyResult<PyObject> {
+        if args.len() < 1 {
             return Ok(path_str);
         }
 
@@ -494,10 +488,10 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
-        _join(&py, arg_str.as_str(), path_list, is_bytes)
+        _join(&py, arg_str.as_str(), args, is_bytes)
     }
 
-    #[pyfn(m, "normpath")]
+    #[pyfunction(m, "normpath")]
     pub fn normpath(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
@@ -509,7 +503,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         str2pyobj!(py, ret_str.as_str(), is_bytes)
     }
 
-    #[pyfn(m, "relpath")]
+    #[pyfunction(m, "relpath")]
     pub fn relpath(py: Python, path_str: PyObject, start: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
@@ -528,7 +522,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         str2pyobj!(py, _relpath(arg_str.as_str(), start_str.as_str()).as_str(), is_bytes)
     }
 
-    #[pyfn(m, "realpath")]
+    #[pyfunction(m, "realpath")]
     pub fn realpath(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
@@ -542,7 +536,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         }
     }
 
-    #[pyfn(m, "split")]
+    #[pyfunction(m, "split")]
     pub fn split(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
@@ -556,7 +550,7 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
         }
     }
 
-    #[pyfn(m, "splitext")]
+    #[pyfunction(m, "splitext")]
     pub fn splitext(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
@@ -569,6 +563,21 @@ fn init_mod(py: Python, m: &PyModule) -> PyResult<()> {
             Err(_) => exc::OSError.into(),
         }
     }
+
+    m.add_function(wrap_function!(abspath))?;
+    m.add_function(wrap_function!(basename))?;
+    m.add_function(wrap_function!(dirname))?;
+    m.add_function(wrap_function!(exists))?;
+    m.add_function(wrap_function!(expanduser))?;
+    m.add_function(wrap_function!(expandvars))?;
+    m.add_function(wrap_function!(isabs))?;
+    m.add_function(wrap_function!(islink))?;
+    m.add_function(wrap_function!(join))?;
+    m.add_function(wrap_function!(normpath))?;
+    m.add_function(wrap_function!(relpath))?;
+    m.add_function(wrap_function!(realpath))?;
+    m.add_function(wrap_function!(split))?;
+    m.add_function(wrap_function!(splitext))?;
 
     Ok(())
 }

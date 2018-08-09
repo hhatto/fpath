@@ -5,7 +5,6 @@ import _fpath
 
 abspath = _fpath.abspath
 basename = _fpath.basename
-join = _fpath.join
 realpath = _fpath.realpath
 dirname = _fpath.dirname
 isabs = _fpath.isabs
@@ -15,6 +14,10 @@ split = _fpath.split
 splitext = _fpath.splitext
 expanduser = _fpath.expanduser
 expandvars = _fpath.expandvars
+
+
+def join(path, *args):
+    return _fpath.join(path, args)
 
 
 def exists(path):
