@@ -1,6 +1,6 @@
 [package]
 name = "fpath"
-version = "0.1.0"
+version = "0.1.2"
 authors = ["Hideo Hattori <hhatto.jp@gmail.com>"]
 
 [lib]
