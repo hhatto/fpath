@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::env::current_dir;
 use std::path::{Path, MAIN_SEPARATOR};
 use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyString, PyTuple, exceptions};
 use users::os::unix::UserExt;
 
 #[macro_use]
@@ -197,12 +198,12 @@ fn _join(py: &Python, path_str: &str, path_list: &PyTuple, is_bytes: bool) -> Py
     for x in path_list.as_slice() {
         let b = pyobj2str(py, x);
         match b {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (b, b_is_bytes) = b.unwrap();
         if is_bytes != b_is_bytes {
-            return Err(exc::TypeError::new("Can't mix strings and bytes in path components"));
+            return Err(exceptions::TypeError::py_err("Can't mix strings and bytes in path components"));
         }
 
         if b.starts_with(MAIN_SEPARATOR) {
@@ -360,7 +361,7 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
     pub fn abspath(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
@@ -369,7 +370,7 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
             Ok(s) => {
                 str2pyobj!(py, s.as_str(), is_bytes)
             }
-            Err(_) => exc::OSError.into(),
+            Err(_) => exceptions::OSError.into(),
         }
     }
 
@@ -377,7 +378,7 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
     pub fn basename(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
@@ -388,7 +389,7 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
     pub fn dirname(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
@@ -409,13 +410,13 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
         //                let f = unsafe { fs::File::from_raw_fd(fd) };
         //                Ok(f.exists())
         //            }
-        //            Err(_) => Err(exc::TypeError::new(e)),
+        //            Err(_) => Err(exceptions::TypeError::py_err(e)),
         //        }
         //    }
         //    Ok(s) => Ok(s.0)
         //};
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, _) = arg_str.unwrap();
@@ -426,7 +427,7 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
     pub fn expanduser(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
@@ -442,7 +443,7 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
     pub fn expandvars(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
@@ -458,7 +459,7 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
     pub fn isabs(py: Python, path_str: PyObject) -> PyResult<bool> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, _is_bytes) = arg_str.unwrap();
@@ -469,7 +470,7 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
     pub fn islink(py: Python, path_str: PyObject) -> PyResult<bool> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, _is_bytes) = arg_str.unwrap();
@@ -484,7 +485,7 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
 
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
@@ -495,7 +496,7 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
     pub fn normpath(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
@@ -507,14 +508,14 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
     pub fn relpath(py: Python, path_str: PyObject, start: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
 
         let start_str = pyobj2str(&py, &start);
         match start_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (start_str, _) = start_str.unwrap();
@@ -526,13 +527,13 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
     pub fn realpath(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
         match _realpath(arg_str.as_str()) {
             Ok(s) => str2pyobj!(py, s.as_str(), is_bytes),
-            Err(e) => Err(exc::OSError::new(e)),
+            Err(e) => Err(exceptions::OSError::py_err(e)),
         }
     }
 
@@ -540,13 +541,13 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
     pub fn split(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
         match _split(arg_str.as_str()) {
             Ok((head, tail)) => tuplestr2pyobj!(py, head, tail, is_bytes),
-            Err(_) => exc::OSError.into(),
+            Err(_) => exceptions::OSError.into(),
         }
     }
 
@@ -554,13 +555,13 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
     pub fn splitext(py: Python, path_str: PyObject) -> PyResult<PyObject> {
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
-            Err(e) => return Err(exc::TypeError::new(e)),
+            Err(e) => return Err(exceptions::TypeError::py_err(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
         match _splitext(arg_str.as_str()) {
             Ok((head, tail)) => tuplestr2pyobj!(py, head, tail, is_bytes),
-            Err(_) => exc::OSError.into(),
+            Err(_) => exceptions::OSError.into(),
         }
     }
 

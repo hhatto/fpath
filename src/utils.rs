@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 
 macro_rules! numsep {
     ( $x:expr ) => (
@@ -56,7 +57,7 @@ pub fn pyobj2str(py: &Python, obj: &PyObject) -> Result<(String, bool), String> 
         Ok(s) => Ok((s, false)),
         Err(_) => match obj.extract::<&PyBytes>(*py) {
             Ok(arg) => {
-                let s = String::from_utf8(arg.data().to_vec());
+                let s = String::from_utf8(arg.as_bytes().to_vec());
                 match s {
                     Err(e) => return Err(format!("undecoded data: {:?}", e)),
                     _ => {},
