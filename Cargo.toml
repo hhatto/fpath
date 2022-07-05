@@ -2,16 +2,17 @@
 name = "fpath"
 version = "0.1.2"
 authors = ["Hideo Hattori <hhatto.jp@gmail.com>"]
+edition = "2021"
 
 [lib]
 name = "path"
 crate-type = ["cdylib"]
 
 [dependencies]
-memchr = "2.0"
-users = "0.6.1"
-shellexpand = "1.0"
+memchr = "2.5"
+users = "0.11.0"
+shellexpand = "2.1"
 
 [dependencies.pyo3]
-version = "0.5.2"
+version = "0.16.5"
 features = ["extension-module"]

@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyBytes, PyString};
 
 macro_rules! numsep {
     ( $x:expr ) => (
@@ -52,10 +52,10 @@ macro_rules! tuplestr2pyobj {
     }
 }
 
-pub fn pyobj2str(py: &Python, obj: &PyObject) -> Result<(String, bool), String> {
-    match obj.extract::<String>(*py) {
-        Ok(s) => Ok((s, false)),
-        Err(_) => match obj.extract::<&PyBytes>(*py) {
+pub fn pyobj2str(py: &Python, obj: &PyAny) -> Result<(String, bool), String> {
+    match obj.downcast::<PyString>() {
+        Ok(s) => Ok((s.to_string(), false)),
+        Err(_) => match obj.downcast::<PyBytes>() {
             Ok(arg) => {
                 let s = String::from_utf8(arg.as_bytes().to_vec());
                 match s {
@@ -70,10 +70,10 @@ pub fn pyobj2str(py: &Python, obj: &PyObject) -> Result<(String, bool), String> 
     }
 }
 
-pub fn pypathlike2str(py: &Python, obj: &PyObject) -> Result<(String, bool), String> {
-    match obj.getattr(*py, "__fspath__") {
+pub fn pypathlike2str(py: &Python, obj: &PyAny) -> Result<(String, bool), String> {
+    match obj.getattr("__fspath__") {
         Ok(func) => {
-            match func.call0(*py) {
+            match func.call0() {
                 Ok(o) => pyobj2str(py, &o),
                 Err(_) => Err("expected str, bytes or os.PathLike object".to_string()),
             }
