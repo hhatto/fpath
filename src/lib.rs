@@ -11,7 +11,8 @@ use std::path::{Path, MAIN_SEPARATOR};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString, PyTuple};
 use pyo3::exceptions;
-use users::os::unix::UserExt;
+use uzers::os::unix::UserExt;
+use uzers::{get_user_by_uid, get_user_by_name, get_current_uid};
 
 #[macro_use]
 mod utils;
@@ -154,7 +155,7 @@ fn _expanduser(path_str: &str) -> String {
         match env::var("HOME") {
             Ok(v) => v,
             Err(_) => {
-                match users::get_user_by_uid(users::get_current_uid() as u32) {
+                match get_user_by_uid(get_current_uid() as u32) {
                     Some(u) => u.home_dir().to_str().unwrap().to_string(),
                     None => panic!("not reached"),
                 }
@@ -162,7 +163,7 @@ fn _expanduser(path_str: &str) -> String {
         }
     } else {
         let name = str::from_utf8(&path_str.as_bytes()[1..i]).unwrap();
-        match users::get_user_by_name(name) {
+        match get_user_by_name(name) {
             Some(u) => u.home_dir().to_str().unwrap().to_string(),
             None => path_str.to_string(),
         }
@@ -484,7 +485,8 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
         Ok(_islink(arg_str.as_str()))
     }
 
-    #[pyfunction(path_str, args="*")]
+    #[pyfunction]
+    #[pyo3(name = "join", text_signature = "(path_str, *args)")]
     pub fn join(py: Python, path_str: &PyAny, args: &PyTuple) -> PyResult<PyObject> {
         if args.len() < 1 {
             let arg_str = pyobj2str(&py, path_str);
