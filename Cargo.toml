@@ -5,14 +5,14 @@ authors = ["Hideo Hattori <hhatto.jp@gmail.com>"]
 edition = "2021"
 
 [lib]
-name = "path"
+name = "_fpath"
 crate-type = ["cdylib"]
 
 [dependencies]
 memchr = "2.5"
-users = "0.11.0"
+uzers = "0.11"
 shellexpand = "2.1"
 
 [dependencies.pyo3]
-version = "0.16.5"
+version = "0.20.0"
 features = ["extension-module"]
