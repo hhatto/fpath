@@ -26,7 +26,7 @@ jobs:
         python -m pip install maturin setuptools-rust pytest
     - name: Build and Install
       run: |
-        maturin develop
+        maturin build
         pip install .
     - name: Test with pytest
       run: |
