@@ -1,6 +1,7 @@
 import os
 import os.path as ospath
-import _fpath
+
+from . import _fpath
 
 
 abspath = _fpath.abspath

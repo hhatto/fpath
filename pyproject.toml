@@ -17,16 +17,23 @@ classifier = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "maturin==1.3.1"
+]
+
+
 [project.urls]
 homepage = "https://github.com/hhatto/fpath"
 repository = "https://github.com/hhatto/fpath"
 
 [build-system]
-requires = ["maturin>=0.15,<0.16"]
+requires = ["maturin==1.3.1"]
 build-backend = "maturin"
 
 [tool.maturin]
-module-name = "_fpath"
+module-name = "fpath._fpath"
 include = [
     { path = "Cargo.lock", format = "sdist" }
 ]
