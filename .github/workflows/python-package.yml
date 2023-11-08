@@ -27,7 +27,7 @@ jobs:
     - name: Build and Install
       run: |
         maturin build
-        pip install .
+        python -m pip install .
     - name: Test with pytest
       run: |
         pytest
