@@ -210,9 +210,6 @@ class PosixPathTest(unittest.TestCase):
         self.assertIs(posixpath.ismount("/"), True)
         self.assertIs(posixpath.ismount(b"/"), True)
         self.assertIs(posixpath.ismount(FakePath("/")), True)
-
-    @unittest.skipIf(sys.version_info < (3, 12), "not support")
-    def test_ismount(self):
         self.assertIs(posixpath.ismount(FakePath(b"/")), True)
 
     def test_ismount_non_existent(self):
