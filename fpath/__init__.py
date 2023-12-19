@@ -1,19 +1,30 @@
 import os
 import os.path as ospath
-import _fpath
+
+from . import _fpath
 
 
-abspath = _fpath.abspath
+def abspath(path):
+    if isinstance(path, bytes):
+        return ospath.abspath(path)
+    return _fpath.abspath(path)
+
+
 basename = _fpath.basename
 realpath = _fpath.realpath
 dirname = _fpath.dirname
 isabs = _fpath.isabs
-islink = _fpath.islink
 normpath = _fpath.normpath
 split = _fpath.split
 splitext = _fpath.splitext
 expanduser = _fpath.expanduser
 expandvars = _fpath.expandvars
+
+
+def islink(path):
+    if isinstance(path, bytes):
+        return ospath.islink(path)
+    return _fpath.islink(path)
 
 
 def join(path, *args):
@@ -24,8 +35,11 @@ def exists(path):
     if type(path) == int:
         return ospath.exists(path)
     if (type(path) is bytes and b'\x00' in path) or (type(path) is str and '\x00' in path):
-        raise ValueError("embedded null byte")
-    return _fpath.exists(path)
+        return ospath.exists(path)
+    try:
+        return _fpath.exists(path)
+    except Exception:
+        return ospath.exists(path)
 
 
 def relpath(path, start=None):
@@ -43,7 +57,7 @@ def relpath(path, start=None):
         os.fspath(start)
     try:
         ret = _fpath.relpath(path, start)
-    except TypeError as err:
+    except TypeError:
         raise(TypeError('"%s" does not match "%s"' % (path_type, start_type)))
     return ret
 

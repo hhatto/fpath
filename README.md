@@ -57,3 +57,24 @@ join               23.01%    0.24s,  0.19s    0.24s,  0.18s   0.00s,  0.00s  100
 expanduser         67.45%    1.50s,  0.49s    1.49s,  0.48s   0.00s,  0.00s  100000
 expandvars         61.37%    1.21s,  0.47s    1.19s,  0.47s   0.00s,  0.00s  100000
 ```
+
+## For Developer
+
+install dev dependencies:
+
+```console
+$ pip install ".[dev]"
+```
+
+build and install:
+
+```console
+$ maturin build
+$ pip install .
+```
+
+run tests:
+
+```
+$ pytest tests/
+```

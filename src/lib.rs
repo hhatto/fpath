@@ -1,6 +1,3 @@
-#[macro_use]
-extern crate pyo3;
-
 extern crate memchr;
 extern crate shellexpand;
 
@@ -9,9 +6,10 @@ use std::collections::HashMap;
 use std::env::current_dir;
 use std::path::{Path, MAIN_SEPARATOR};
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyString, PyTuple};
+use pyo3::types::{PyBytes, PyDict, PyString, PyTuple};
 use pyo3::exceptions;
-use users::os::unix::UserExt;
+use uzers::os::unix::UserExt;
+use uzers::{get_user_by_uid, get_user_by_name, get_current_uid};
 
 #[macro_use]
 mod utils;
@@ -25,7 +23,7 @@ fn _islink(path_str: &str) -> bool {
     std::fs::read_link(path_str).is_ok()
 }
 
-fn _joinrealpath(path_str: &str, rest: &str, seen: &HashMap<String, Option<String>>) -> (String, bool) {
+fn _joinrealpath(path_str: &str, rest: &str, strict: bool, seen: &HashMap<String, Option<String>>) -> Result<(String, bool), PyErr> {
     let mut use_seen = seen.clone();
     let (mut ret_path, mut use_rest) = if _isabs(rest) {
         let (_head, tail) = rest.split_at(1);
@@ -55,8 +53,19 @@ fn _joinrealpath(path_str: &str, rest: &str, seen: &HashMap<String, Option<Strin
         }
 
         let newpath = _inner_join(ret_path.as_str(), &[name]);
-        if !_islink(newpath.as_str()) {
-            ret_path = newpath.to_string();
+        let is_link = match std::fs::symlink_metadata(newpath.as_str()) {
+            Ok(meta) => {
+                meta.file_type().is_symlink()
+            },
+            Err(_) => {
+                if strict {
+                    return Err(exceptions::PyFileNotFoundError::new_err(format!("invalid path: {}", newpath)));
+                }
+                false
+            }
+        };
+        if !is_link {
+            ret_path = newpath;
             continue;
         }
         if use_seen.contains_key(newpath.as_str()) {
@@ -67,24 +76,35 @@ fn _joinrealpath(path_str: &str, rest: &str, seen: &HashMap<String, Option<Strin
                 }
                 _ => {}
             }
-            return (_inner_join(newpath.as_str(), &[use_rest]), false);
+            if strict {
+                if std::fs::metadata(newpath.as_str()).is_err() {
+                    return Err(exceptions::PyOSError::new_err(format!("invalid path: {}", newpath)));
+                }
+            } else {
+                return Ok((_inner_join(newpath.as_str(), &[use_rest]), false));
+            }
         }
 
         use_seen.insert(newpath.clone(), None);
         let indeep = std::fs::read_link(newpath.clone()).unwrap();
-        let (rp, ok) = _joinrealpath(
+        match _joinrealpath(
             ret_path.as_str(),
             indeep.to_str().unwrap(),
+            strict,
             &use_seen.clone(),
-        );
-        ret_path = rp;
-        if !ok {
-            return (_inner_join(ret_path.as_str(), &[use_rest]), false);
-        }
+        ) {
+            Ok((rp, ok)) => {
+                ret_path = rp;
+                if !ok {
+                    return Ok((_inner_join(ret_path.as_str(), &[use_rest]), false));
+                }
+            },
+            Err(e) => return Err(e),
+        };
         use_seen.insert(newpath, Some(ret_path.clone()));
     }
 
-    (ret_path.to_string(), true)
+    Ok((ret_path.to_string(), true))
 }
 
 pub fn _inner_join(path_str: &str, path_list: &[&str]) -> String {
@@ -103,13 +123,13 @@ pub fn _inner_join(path_str: &str, path_list: &[&str]) -> String {
     ret_path
 }
 
-fn _abspath(path_str: &str) -> Result<String, String> {
+fn _abspath(path_str: &str) -> Result<String, PyErr> {
     if _isabs(path_str) {
         return Ok(_normpath(path_str));
     }
     match current_dir() {
         Ok(c) => Ok(_normpath(c.join(path_str).to_string_lossy().into_owned().as_str())),
-        Err(e) => Err(format!("{}", e)),
+        Err(e) => Err(exceptions::PyOSError::new_err(format!("{}", e))),
     }
 }
 
@@ -154,15 +174,15 @@ fn _expanduser(path_str: &str) -> String {
         match env::var("HOME") {
             Ok(v) => v,
             Err(_) => {
-                match users::get_user_by_uid(users::get_current_uid() as u32) {
+                match get_user_by_uid(get_current_uid() as u32) {
                     Some(u) => u.home_dir().to_str().unwrap().to_string(),
-                    None => panic!("not reached"),
+                    None => path_str.to_string(),
                 }
             }
         }
     } else {
         let name = str::from_utf8(&path_str.as_bytes()[1..i]).unwrap();
-        match users::get_user_by_name(name) {
+        match get_user_by_name(name) {
             Some(u) => u.home_dir().to_str().unwrap().to_string(),
             None => path_str.to_string(),
         }
@@ -253,10 +273,12 @@ fn _normpath(path_str: &str) -> String {
     }
 }
 
-fn _realpath(path_str: &str) -> Result<String, String> {
+fn _realpath(path_str: &str, strict: bool) -> Result<String, PyErr> {
     let seen = HashMap::new();
-    let (ret_path, _) = _joinrealpath("", path_str, &seen);
-    _abspath(ret_path.as_str())
+    match _joinrealpath("", path_str, strict, &seen) {
+        Ok((ret_path, _)) => return _abspath(ret_path.as_str()),
+        Err(e) => return Err(e),
+    }
 }
 
 fn _commonprefix(m: &Vec<&[String]>) -> Result<Vec<String>, String> {
@@ -484,7 +506,8 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
         Ok(_islink(arg_str.as_str()))
     }
 
-    #[pyfunction(path_str, args="*")]
+    #[pyfunction]
+    #[pyo3(name = "join", text_signature = "(path_str, *args)")]
     pub fn join(py: Python, path_str: &PyAny, args: &PyTuple) -> PyResult<PyObject> {
         if args.len() < 1 {
             let arg_str = pyobj2str(&py, path_str);
@@ -539,17 +562,26 @@ fn init_mod(_py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     #[pyfunction]
-    #[pyo3(name = "realpath")]
-    pub fn realpath(py: Python, path_str: &PyAny) -> PyResult<PyObject> {
+    #[pyo3(name = "realpath", signature = (path_str, *_py_args, **py_kwargs))]
+    pub fn realpath(py: Python, path_str: &PyAny, _py_args: &PyTuple, py_kwargs: Option<&PyDict>) -> PyResult<PyObject> {
+        let strict = if py_kwargs.is_some() {
+            let kwargs = py_kwargs.expect("kwargs parse error");
+            match kwargs.get_item("strict").expect("kwargs parse error") {
+                Some(x) => x.extract::<bool>().expect("invalid strict value"),
+                None => false,
+            }
+        } else {
+            false
+        };
         let arg_str = pyobj2str(&py, &path_str);
         match arg_str {
             Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
             _ => {}
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
-        match _realpath(arg_str.as_str()) {
+        match _realpath(arg_str.as_str(), strict) {
             Ok(s) => str2pyobj!(py, s.as_str(), is_bytes),
-            Err(e) => Err(exceptions::PyOSError::new_err(e)),
+            Err(e) => Err(e),
         }
     }
 
@@ -647,14 +679,14 @@ mod tests {
     #[test]
     fn realpath() {
         let fname = "//";
-        let result_str = _realpath(fname).unwrap();
+        let result_str = _realpath(fname, false).unwrap();
         assert_eq!(result_str, "/");
     }
 
     #[test]
     fn test_joinrealpath() {
         let fname = "//";
-        let ret = _joinrealpath("", fname, &HashMap::new());
+        let ret = _joinrealpath("", fname, false, &HashMap::new()).expect("joinrealpath error");
         assert_eq!(ret, ("/".to_string(), true));
     }
 }

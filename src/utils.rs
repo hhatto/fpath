@@ -75,9 +75,9 @@ pub fn pypathlike2str(py: &Python, obj: &PyAny) -> Result<(String, bool), String
         Ok(func) => {
             match func.call0() {
                 Ok(o) => pyobj2str(py, &o),
-                Err(_) => Err("expected str, bytes or os.PathLike object".to_string()),
+                Err(_) => Err(format!("expected str, bytes or os.PathLike object, not '{}'", obj.get_type().name().unwrap())),
             }
         },
-        Err(_) => Err("expected str, bytes or os.PathLike object".to_string()),
+        Err(_) => Err(format!("expected str, bytes or os.PathLike object, not '{}'", obj.get_type().name().unwrap())),
     }
 }
