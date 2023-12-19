@@ -543,7 +543,7 @@ class CommonTest(GenericTest):
                 self.pathmodule.relpath(bytearray(b'foo'), bytearray(b'bar'))
 
     def test_import(self):
-        assert_python_ok('-S', '-c', 'import ' + self.pathmodule.__name__)
+        assert_python_ok('-c', 'import ' + self.pathmodule.__name__)
 
 
 class PathLikeTests(unittest.TestCase):
