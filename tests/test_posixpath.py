@@ -7,10 +7,14 @@ import fpath as posixpath
 import sys
 import unittest
 from fpath import realpath, abspath, dirname, basename
-from test.support import import_helper
+try:
+    from test.support import import_helper
+except ImportError:
+    # for Python3.8 and lower version
+    import importlib as import_helper
 from test.support import os_helper
 from test.support.os_helper import FakePath
-from unittest import mock
+# from unittest import mock
 sys.path.insert(0, dirname(realpath(__file__)))
 import test_genericpath
 
