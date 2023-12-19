@@ -14,12 +14,17 @@ basename = _fpath.basename
 realpath = _fpath.realpath
 dirname = _fpath.dirname
 isabs = _fpath.isabs
-islink = _fpath.islink
 normpath = _fpath.normpath
 split = _fpath.split
 splitext = _fpath.splitext
 expanduser = _fpath.expanduser
 expandvars = _fpath.expandvars
+
+
+def islink(path):
+    if isinstance(path, bytes):
+        return ospath.islink(path)
+    return _fpath.islink(path)
 
 
 def join(path, *args):
