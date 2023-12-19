@@ -1,4 +1,4 @@
-# fpath [![](https://travis-ci.org/hhatto/fpath.svg?branch=master)](https://travis-ci.org/hhatto/fpath)
+# fpath [![build](https://github.com/hhatto/fpath/actions/workflows/python-package.yml/badge.svg?branch=main)](https://github.com/hhatto/fpath/actions/workflows/python-package.yml)
 Python's os.path module written in Rust
 
 
