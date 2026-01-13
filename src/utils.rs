@@ -25,9 +25,9 @@ macro_rules! str2pyobj {
     ( $py:expr, $s:expr, $is_bytes:expr ) => {
         {
             if $is_bytes {
-                Ok(PyBytes::new($py, $s.as_bytes()).to_object($py))
+                Ok(PyBytes::new($py, $s.as_bytes()).unbind().into_any())
             } else {
-                Ok(PyString::new($py, $s).to_object($py))
+                Ok(PyString::new($py, $s).unbind().into_any())
             }
         }
     }
@@ -36,45 +36,41 @@ macro_rules! str2pyobj {
 macro_rules! tuplestr2pyobj {
     ( $py:expr, $head:expr, $tail:expr, $is_bytes:expr ) => {
         {
-            let (py_head, py_tail) = if $is_bytes {
+            let (py_head, py_tail): (Py<PyAny>, Py<PyAny>) = if $is_bytes {
                 (
-                    PyBytes::new($py, $head.as_bytes()).to_object($py),
-                    PyBytes::new($py, $tail.as_bytes()).to_object($py),
+                    PyBytes::new($py, $head.as_bytes()).unbind().into_any(),
+                    PyBytes::new($py, $tail.as_bytes()).unbind().into_any(),
                 )
             } else {
                 (
-                    PyString::new($py, $head).to_object($py),
-                    PyString::new($py, $tail).to_object($py),
+                    PyString::new($py, $head).unbind().into_any(),
+                    PyString::new($py, $tail).unbind().into_any(),
                 )
             };
-            Ok(PyTuple::new($py, &[py_head, py_tail]).to_object($py))
+            Ok(PyTuple::new($py, &[py_head, py_tail])?.unbind().into_any())
         }
     }
 }
 
-pub fn pyobj2str(py: &Python, obj: &PyAny) -> Result<(String, bool), String> {
-    match obj.downcast::<PyString>() {
-        Ok(s) => Ok((s.to_string(), false)),
-        Err(_) => match obj.downcast::<PyBytes>() {
-            Ok(arg) => {
-                let s = String::from_utf8(arg.as_bytes().to_vec());
-                match s {
-                    Err(e) => return Err(format!("undecoded data: {:?}", e)),
-                    _ => {},
-                }
-                let s = s.unwrap();
-                Ok((s, true))
-            },
-            Err(_) => pypathlike2str(py, obj),
-        },
+pub fn pyobj2str(obj: &Bound<'_, PyAny>) -> Result<(String, bool), String> {
+    if let Ok(s) = obj.cast::<PyString>() {
+        return Ok((s.to_string(), false));
     }
+    if let Ok(arg) = obj.cast::<PyBytes>() {
+        let s = String::from_utf8(arg.as_bytes().to_vec());
+        match s {
+            Err(e) => return Err(format!("undecoded data: {:?}", e)),
+            Ok(s) => return Ok((s, true)),
+        }
+    }
+    pypathlike2str(obj)
 }
 
-pub fn pypathlike2str(py: &Python, obj: &PyAny) -> Result<(String, bool), String> {
+pub fn pypathlike2str(obj: &Bound<'_, PyAny>) -> Result<(String, bool), String> {
     match obj.getattr("__fspath__") {
         Ok(func) => {
             match func.call0() {
-                Ok(o) => pyobj2str(py, &o),
+                Ok(o) => pyobj2str(&o),
                 Err(_) => Err(format!("expected str, bytes or os.PathLike object, not '{}'", obj.get_type().name().unwrap())),
             }
         },

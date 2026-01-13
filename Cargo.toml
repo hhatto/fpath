@@ -14,5 +14,5 @@ uzers = "0.11"
 shellexpand = "2.1"
 
 [dependencies.pyo3]
-version = "0.20.0"
+version = "0.27.2"
 features = ["extension-module"]
