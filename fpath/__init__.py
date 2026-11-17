@@ -15,7 +15,6 @@ commonpath = _fpath.commonpath
 realpath = _fpath.realpath
 dirname = _fpath.dirname
 isabs = _fpath.isabs
-normpath = _fpath.normpath
 split = _fpath.split
 splitext = _fpath.splitext
 expanduser = _fpath.expanduser
@@ -91,6 +90,9 @@ isdevdrive = ospath.isdevdrive
 isjunction = ospath.isjunction
 lexists = ospath.lexists
 normcase = ospath.normcase
+# os.path.normpath is implemented in C, which is as fast as or faster than a
+# Rust implementation called through PyO3.
+normpath = ospath.normpath
 samefile = ospath.samefile
 sameopenfile = ospath.sameopenfile
 samestat = ospath.samestat
