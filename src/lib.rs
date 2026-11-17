@@ -484,6 +484,56 @@ fn _commonprefix(m: &Vec<&[String]>) -> Result<Vec<String>, String> {
     Ok(s1.iter().map(|x| x.to_string()).collect())
 }
 
+/// Path components used by `commonpath()`: empty and "." components are dropped.
+fn commonpath_components(path: &[u8]) -> impl Iterator<Item = &[u8]> {
+    path.split(|&c| c == b'/').filter(|c| !c.is_empty() && *c != b".")
+}
+
+/// Returns the longest common sub-path of `paths`. Returns None if `paths` is
+/// empty or mixes absolute and relative paths.
+///
+/// This works on bytes, so it handles both bytes and (UTF-8 encoded) str paths.
+fn _commonpath(paths: &[&[u8]]) -> Option<Vec<u8>> {
+    let (first, rest) = paths.split_first()?;
+    let isabs = first.starts_with(b"/");
+    if rest.iter().any(|path| path.starts_with(b"/") != isabs) {
+        return None;
+    }
+
+    let mut common: Vec<&[u8]> = commonpath_components(first).collect();
+    for path in rest {
+        if common.is_empty() {
+            break;
+        }
+        let n = commonpath_components(path)
+            .zip(&common)
+            .take_while(|(c, common_c)| c == *common_c)
+            .count();
+        common.truncate(n);
+    }
+
+    let mut ret = Vec::new();
+    if isabs {
+        ret.push(b'/');
+    }
+    for (i, c) in common.iter().enumerate() {
+        if i > 0 {
+            ret.push(b'/');
+        }
+        ret.extend_from_slice(c);
+    }
+    Some(ret)
+}
+
+static OS_FSPATH: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+static OS_PATH_COMMONPATH: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+
+/// Delegates to `os.path.commonpath()`, e.g. to raise the same errors.
+fn commonpath_fallback(py: Python<'_>, paths: &[Bound<'_, PyAny>]) -> PyResult<Py<PyAny>> {
+    let commonpath = OS_PATH_COMMONPATH.import(py, "os.path", "commonpath")?;
+    Ok(commonpath.call1((PyTuple::new(py, paths)?,))?.unbind())
+}
+
 fn _relpath(path_str: &str, start: &str) -> String {
     let start_list: Vec<String> = _abspath(start)
         .unwrap()
@@ -586,6 +636,49 @@ fn init_mod(m: &Bound<'_, PyModule>) -> PyResult<()> {
         }
         let (arg_str, is_bytes) = arg_str.unwrap();
         Ok(_basename(py, arg_str.as_str(), is_bytes))
+    }
+
+    #[pyfunction]
+    #[pyo3(name = "commonpath")]
+    pub fn commonpath(py: Python<'_>, paths: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        // paths = tuple(map(os.fspath, paths))
+        let mut items = Vec::new();
+        for item in paths.try_iter()? {
+            let item = item?;
+            if item.is_exact_instance_of::<PyString>() || item.is_exact_instance_of::<PyBytes>() {
+                items.push(item);
+            } else {
+                items.push(OS_FSPATH.import(py, "os", "fspath")?.call1((item,))?);
+            }
+        }
+
+        // Only handle paths that are all exact str (encodable to UTF-8) or
+        // all exact bytes. Everything else, including the error cases, is
+        // delegated to os.path.
+        let is_bytes = match items.first() {
+            Some(first) => first.is_exact_instance_of::<PyBytes>(),
+            None => return commonpath_fallback(py, &items),
+        };
+        let parts: Option<Vec<&[u8]>> = items
+            .iter()
+            .map(|item| {
+                if is_bytes {
+                    item.cast_exact::<PyBytes>().ok().map(|b| b.as_bytes())
+                } else {
+                    // to_str() fails for a str with lone surrogates
+                    item.cast_exact::<PyString>().ok().and_then(|s| s.to_str().ok()).map(str::as_bytes)
+                }
+            })
+            .collect();
+        let ret = match parts.as_deref().and_then(_commonpath) {
+            Some(ret) => ret,
+            None => return commonpath_fallback(py, &items),
+        };
+        if is_bytes {
+            Ok(PyBytes::new(py, &ret).into_any().unbind())
+        } else {
+            Ok(PyString::new(py, &String::from_utf8(ret)?).into_any().unbind())
+        }
     }
 
     #[pyfunction]
@@ -792,6 +885,7 @@ fn init_mod(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     m.add_function(wrap_pyfunction!(abspath, m)?)?;
     m.add_function(wrap_pyfunction!(basename, m)?)?;
+    m.add_function(wrap_pyfunction!(commonpath, m)?)?;
     m.add_function(wrap_pyfunction!(dirname, m)?)?;
     m.add_function(wrap_pyfunction!(exists, m)?)?;
     m.add_function(wrap_pyfunction!(expanduser, m)?)?;
@@ -811,7 +905,7 @@ fn init_mod(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use std::env::current_dir;
-    use super::{_abspath, _dirname, _realpath, RealpathError, RealpathMode};
+    use super::{_abspath, _commonpath, _dirname, _realpath, RealpathError, RealpathMode};
 
     const ALL_MODES: [RealpathMode; 4] = [
         RealpathMode::NonStrict,
@@ -855,6 +949,42 @@ mod tests {
         let dpath = "/path/to/dirname/";
         let result_str = _dirname(dpath);
         assert_eq!(result_str, "/path/to/dirname");
+    }
+
+    fn commonpath_of(paths: &[&str]) -> Option<String> {
+        let paths: Vec<&[u8]> = paths.iter().map(|p| p.as_bytes()).collect();
+        _commonpath(&paths).map(|ret| String::from_utf8(ret).unwrap())
+    }
+
+    #[test]
+    fn commonpath() {
+        let cases: &[(&[&str], &str)] = &[
+            (&["/usr/local"], "/usr/local"),
+            (&["/usr/local/", "/usr/local"], "/usr/local"),
+            (&["/usr//local", "//usr/local"], "/usr/local"),
+            (&["/usr/./local", "/./usr/local"], "/usr/local"),
+            (&["/", "/dev"], "/"),
+            (&["/usr", "/dev"], "/"),
+            (&["/usr/lib/", "/usr/lib/python3"], "/usr/lib"),
+            (&["/usr/lib", "/usr/lib64"], "/usr"),
+            (&["spam", "alot"], ""),
+            (&["and//jam", "and/spam//"], "and"),
+            (&["and/jam", "and/spam", "alot"], ""),
+            (&["and/jam", "and/spam", "and"], "and"),
+            (&[""], ""),
+            (&["", "spam/alot"], ""),
+            (&["/日本/語", "/日本/本"], "/日本"),
+        ];
+        for (paths, expected) in cases {
+            assert_eq!(commonpath_of(paths), Some(expected.to_string()), "{:?}", paths);
+        }
+    }
+
+    #[test]
+    fn commonpath_error() {
+        assert_eq!(commonpath_of(&[]), None);
+        assert_eq!(commonpath_of(&["/usr", "usr"]), None);
+        assert_eq!(commonpath_of(&["", "/spam/alot"]), None);
     }
 
     #[test]
