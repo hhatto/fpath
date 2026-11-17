@@ -20,6 +20,13 @@ splitext = _fpath.splitext
 expanduser = _fpath.expanduser
 expandvars = _fpath.expandvars
 
+# Sentinels for realpath(strict=...): ALLOW_MISSING (Python 3.13.4+) and
+# ALL_BUT_LAST (Python 3.15+).
+if hasattr(ospath, "ALLOW_MISSING"):
+    ALLOW_MISSING = ospath.ALLOW_MISSING
+if hasattr(ospath, "ALL_BUT_LAST"):
+    ALL_BUT_LAST = ospath.ALL_BUT_LAST
+
 
 def islink(path):
     if isinstance(path, bytes):

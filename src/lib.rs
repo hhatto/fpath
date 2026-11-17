@@ -2,10 +2,12 @@ extern crate memchr;
 extern crate shellexpand;
 
 use std::{env, str};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::env::current_dir;
 use std::path::{Path, MAIN_SEPARATOR};
 use pyo3::prelude::*;
+use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBytes, PyDict, PyString, PyTuple};
 use pyo3::exceptions;
 use uzers::os::unix::UserExt;
@@ -23,88 +25,286 @@ fn _islink(path_str: &str) -> bool {
     std::fs::read_link(path_str).is_ok()
 }
 
-fn _joinrealpath(path_str: &str, rest: &str, strict: bool, seen: &HashMap<String, Option<String>>) -> Result<(String, bool), PyErr> {
-    let mut use_seen = seen.clone();
-    let (mut ret_path, mut use_rest) = if _isabs(rest) {
-        let (_head, tail) = rest.split_at(1);
-        (MAIN_SEPARATOR.to_string(), tail)
-    } else {
-        (path_str.to_string(), rest)
-    };
+/// Mode selected by the `strict` argument of `realpath()`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RealpathMode {
+    /// `strict=False`: every `OSError` is ignored.
+    NonStrict,
+    /// `strict=True`: no error is ignored.
+    Strict,
+    /// `strict=os.path.ALLOW_MISSING`: only `FileNotFoundError` is ignored.
+    AllowMissing,
+    /// `strict=os.path.ALL_BUT_LAST`: `FileNotFoundError` is ignored only for
+    /// the last path component.
+    AllButLast,
+}
 
-    while !use_rest.is_empty() {
-        let (name, _, tmp_rest) = partition!(use_rest, "/");
-        use_rest = tmp_rest;
+impl RealpathMode {
+    /// Whether an `OSError` with `errno` is ignored. The "last component only"
+    /// rule of `ALL_BUT_LAST` is checked by the caller.
+    #[inline]
+    fn ignores(self, errno: i32) -> bool {
+        match self {
+            RealpathMode::NonStrict => true,
+            RealpathMode::Strict => false,
+            RealpathMode::AllowMissing | RealpathMode::AllButLast => errno == libc::ENOENT,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RealpathError {
+    /// Raised as `OSError(errno, os.strerror(errno), filename)`.
+    Os { errno: i32, filename: Option<String> },
+    /// Raised as `ValueError`, like `os.lstat()` does.
+    EmbeddedNul,
+    /// A path that can not be handled as UTF-8; the caller falls back to
+    /// `os.path.realpath()`.
+    NonUtf8,
+}
+
+impl RealpathError {
+    fn os(errno: i32, filename: &str) -> Self {
+        RealpathError::Os { errno, filename: Some(filename.to_string()) }
+    }
+
+    fn from_io(e: std::io::Error, filename: Option<&str>) -> Self {
+        RealpathError::Os {
+            errno: e.raw_os_error().unwrap_or(libc::EIO),
+            filename: filename.map(str::to_string),
+        }
+    }
+}
+
+/// An entry of the stack of unresolved path parts in `_realpath()`.
+enum RealpathPart<'a> {
+    /// A path component that is not processed yet.
+    Name(Cow<'a, str>),
+    /// Marks that the target of the symlink at this path has been resolved.
+    ResolvedLink(String),
+}
+
+/// What the path component being processed turned out to be.
+enum RealpathStep {
+    /// Not a symlink, or a symlink loop in non-strict mode.
+    Plain,
+    /// A symlink whose fully resolved path is already known.
+    Cached(String),
+    /// A symlink to resolve, with its target.
+    Link(String),
+}
+
+/// Port of `posixpath.realpath()` in CPython 3.15.
+fn _realpath(filename: &str, mode: RealpathMode) -> Result<String, RealpathError> {
+    let strict = mode != RealpathMode::NonStrict;
+
+    // The stack of unresolved path parts, in reverse order.
+    let mut rest: Vec<RealpathPart> = filename
+        .trim_end_matches(MAIN_SEPARATOR)
+        .rsplit(MAIN_SEPARATOR)
+        .map(|name| RealpathPart::Name(Cow::Borrowed(name)))
+        .collect();
+
+    // Number of unprocessed parts in `rest`. This can differ from rest.len()
+    // later, because `rest` might contain markers for unresolved symlinks.
+    let mut part_count = rest.len();
+
+    // The resolved path, which is absolute throughout this function.
+    // Note: getcwd() returns a normalized and symlink-free path.
+    let mut path = if _isabs(filename) {
+        MAIN_SEPARATOR.to_string()
+    } else {
+        current_dir()
+            .map_err(|e| RealpathError::from_io(e, None))?
+            .into_os_string()
+            .into_string()
+            .map_err(|_| RealpathError::NonUtf8)?
+    };
+    let trailing_sep = filename.ends_with(MAIN_SEPARATOR);
+
+    // Mapping from symlink paths to *fully resolved* symlink targets. If a
+    // symlink is encountered but not yet resolved, the value is None. This is
+    // used both to detect symlink loops and to speed up repeated traversals of
+    // the same links.
+    let mut seen: HashMap<String, Option<String>> = HashMap::new();
+
+    while part_count > 0 {
+        let name = match rest.pop() {
+            Some(RealpathPart::Name(name)) => name,
+            Some(RealpathPart::ResolvedLink(link)) => {
+                seen.insert(link, Some(path.clone()));
+                continue;
+            }
+            None => break,
+        };
+        part_count -= 1;
         if name.is_empty() || name == "." {
+            // current dir
             continue;
         }
         if name == ".." {
-            if ret_path.is_empty() {
-                ret_path = "..".to_string();
-            } else {
-                let (rp, n) = _inner_split(ret_path.as_str()).unwrap();
-                ret_path = rp;
-                if n == ".." {
-                    let rp = _inner_join(ret_path.as_str(), &["..", ".."]);
-                    ret_path = rp;
-                }
+            // parent dir; `path` is absolute, so it always contains a separator.
+            let i = path.rfind(MAIN_SEPARATOR).unwrap_or(0);
+            path.truncate(i);
+            if path.is_empty() {
+                path.push(MAIN_SEPARATOR);
             }
             continue;
         }
+        if memchr::memchr(0, name.as_bytes()).is_some() {
+            return Err(RealpathError::EmbeddedNul);
+        }
+        let mut newpath = String::with_capacity(path.len() + 1 + name.len());
+        newpath.push_str(&path);
+        if path.len() != 1 {
+            // `path` is not the root directory
+            newpath.push(MAIN_SEPARATOR);
+        }
+        newpath.push_str(&name);
 
-        let newpath = _inner_join(ret_path.as_str(), &[name]);
-        let is_link = match std::fs::symlink_metadata(newpath.as_str()) {
-            Ok(meta) => {
-                meta.file_type().is_symlink()
-            },
-            Err(_) => {
-                if strict {
-                    return Err(exceptions::PyFileNotFoundError::new_err(format!("invalid path: {}", newpath)));
+        let step = match std::fs::symlink_metadata(&newpath) {
+            Err(e) => Err(RealpathError::from_io(e, Some(&newpath))),
+            Ok(meta) if !meta.file_type().is_symlink() => {
+                if strict && (part_count > 0 || trailing_sep) && !meta.is_dir() {
+                    Err(RealpathError::os(libc::ENOTDIR, &newpath))
+                } else {
+                    Ok(RealpathStep::Plain)
                 }
-                false
             }
+            Ok(_) => match seen.get(&newpath) {
+                // use cached value
+                Some(Some(resolved)) => Ok(RealpathStep::Cached(resolved.clone())),
+                // The symlink is not resolved, so we must have a symlink loop.
+                Some(None) if strict => Err(RealpathError::os(libc::ELOOP, &newpath)),
+                Some(None) => Ok(RealpathStep::Plain),
+                None => match std::fs::read_link(&newpath) {
+                    Ok(target) => Ok(RealpathStep::Link(
+                        target.into_os_string().into_string().map_err(|_| RealpathError::NonUtf8)?,
+                    )),
+                    Err(e) => Err(RealpathError::from_io(e, Some(&newpath))),
+                },
+            },
         };
-        if !is_link {
-            ret_path = newpath;
-            continue;
-        }
-        if use_seen.contains_key(newpath.as_str()) {
-            match use_seen.get(newpath.as_str()).unwrap() {
-                &Some(ref v) => {
-                    ret_path = v.to_string();
-                    continue;
-                }
-                _ => {}
-            }
-            if strict {
-                if std::fs::metadata(newpath.as_str()).is_err() {
-                    return Err(exceptions::PyOSError::new_err(format!("invalid path: {}", newpath)));
-                }
-            } else {
-                return Ok((_inner_join(newpath.as_str(), &[use_rest]), false));
-            }
-        }
 
-        use_seen.insert(newpath.clone(), None);
-        let indeep = std::fs::read_link(newpath.clone()).unwrap();
-        match _joinrealpath(
-            ret_path.as_str(),
-            indeep.to_str().unwrap(),
-            strict,
-            &use_seen.clone(),
-        ) {
-            Ok((rp, ok)) => {
-                ret_path = rp;
-                if !ok {
-                    return Ok((_inner_join(ret_path.as_str(), &[use_rest]), false));
+        match step {
+            Ok(RealpathStep::Plain) => path = newpath,
+            Ok(RealpathStep::Cached(resolved)) => path = resolved,
+            Ok(RealpathStep::Link(target)) => {
+                if _isabs(&target) {
+                    // Symlink target is absolute; reset resolved path.
+                    path = MAIN_SEPARATOR.to_string();
                 }
-            },
+                // Mark this symlink as seen but not fully resolved, and push a
+                // marker to record its resolved path once the target parts
+                // below it have been processed.
+                seen.insert(newpath.clone(), None);
+                rest.push(RealpathPart::ResolvedLink(newpath));
+                // Push the unresolved symlink target parts onto the stack.
+                let len = rest.len();
+                rest.extend(
+                    target
+                        .rsplit(MAIN_SEPARATOR)
+                        .map(|name| RealpathPart::Name(Cow::Owned(name.to_string()))),
+                );
+                part_count += rest.len() - len;
+            }
+            Err(RealpathError::Os { errno, filename }) => {
+                if !mode.ignores(errno) || (mode == RealpathMode::AllButLast && part_count > 0) {
+                    return Err(RealpathError::Os { errno, filename });
+                }
+                // An error occurred and was ignored.
+                path = newpath;
+            }
             Err(e) => return Err(e),
-        };
-        use_seen.insert(newpath, Some(ret_path.clone()));
+        }
     }
 
-    Ok((ret_path.to_string(), true))
+    Ok(path)
+}
+
+static ALLOW_MISSING: PyOnceLock<Option<Py<PyAny>>> = PyOnceLock::new();
+static ALL_BUT_LAST: PyOnceLock<Option<Py<PyAny>>> = PyOnceLock::new();
+
+/// Returns `os.path.<name>`, or None if the running Python does not have it.
+fn os_path_sentinel<'a>(
+    py: Python<'_>,
+    cell: &'a PyOnceLock<Option<Py<PyAny>>>,
+    name: &str,
+) -> PyResult<Option<&'a Py<PyAny>>> {
+    let value = cell.get_or_try_init(py, || -> PyResult<Option<Py<PyAny>>> {
+        let ospath = py.import("os")?.getattr("path")?;
+        Ok(ospath.getattr(name).ok().map(Bound::unbind))
+    })?;
+    Ok(value.as_ref())
+}
+
+fn realpath_mode(py: Python<'_>, strict: Option<&Bound<'_, PyAny>>) -> PyResult<RealpathMode> {
+    let strict = match strict {
+        Some(strict) => strict,
+        None => return Ok(RealpathMode::NonStrict),
+    };
+    if let Some(sentinel) = os_path_sentinel(py, &ALLOW_MISSING, "ALLOW_MISSING")? {
+        if strict.is(sentinel) {
+            return Ok(RealpathMode::AllowMissing);
+        }
+    }
+    if let Some(sentinel) = os_path_sentinel(py, &ALL_BUT_LAST, "ALL_BUT_LAST")? {
+        if strict.is(sentinel) {
+            return Ok(RealpathMode::AllButLast);
+        }
+    }
+    if strict.is_truthy()? {
+        Ok(RealpathMode::Strict)
+    } else {
+        Ok(RealpathMode::NonStrict)
+    }
+}
+
+/// Converts the `filename` argument of `realpath()`. Returns None for the
+/// arguments that fpath can not handle (e.g. undecodable file names or
+/// invalid types).
+fn realpath_arg(obj: &Bound<'_, PyAny>) -> Option<(String, bool)> {
+    match obj.cast::<PyString>() {
+        // to_str() fails for a str with lone surrogates
+        Ok(s) => s.to_str().ok().map(|s| (s.to_string(), false)),
+        Err(_) => pyobj2str(obj).ok(),
+    }
+}
+
+/// Delegates to `os.path.realpath()`.
+fn realpath_fallback(
+    py: Python<'_>,
+    filename: &Bound<'_, PyAny>,
+    strict: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Py<PyAny>> {
+    let realpath = py.import("os")?.getattr("path")?.getattr("realpath")?;
+    let kwargs = PyDict::new(py);
+    if let Some(strict) = strict {
+        kwargs.set_item("strict", strict)?;
+    }
+    Ok(realpath.call((filename,), Some(&kwargs))?.unbind())
+}
+
+fn realpath_error(py: Python<'_>, err: RealpathError, is_bytes: bool) -> PyErr {
+    match err {
+        RealpathError::Os { errno, filename } => {
+            let new_oserror = || -> PyResult<PyErr> {
+                // OSError(errno, ...) creates the subclass for the errno,
+                // e.g. FileNotFoundError for ENOENT.
+                let oserror = py.get_type::<exceptions::PyOSError>();
+                let strerror = py.import("os")?.call_method1("strerror", (errno,))?;
+                let exc = match filename {
+                    Some(f) if is_bytes => oserror.call1((errno, strerror, PyBytes::new(py, f.as_bytes())))?,
+                    Some(f) => oserror.call1((errno, strerror, PyString::new(py, &f)))?,
+                    None => oserror.call1((errno, strerror))?,
+                };
+                Ok(PyErr::from_value(exc))
+            };
+            new_oserror().unwrap_or_else(|e| e)
+        }
+        RealpathError::EmbeddedNul => exceptions::PyValueError::new_err("embedded null byte"),
+        RealpathError::NonUtf8 => exceptions::PyValueError::new_err("path is not valid UTF-8"),
+    }
 }
 
 pub fn _inner_join(path_str: &str, path_list: &[&str]) -> String {
@@ -273,14 +473,6 @@ fn _normpath(path_str: &str) -> String {
     }
 }
 
-fn _realpath(path_str: &str, strict: bool) -> Result<String, PyErr> {
-    let seen = HashMap::new();
-    match _joinrealpath("", path_str, strict, &seen) {
-        Ok((ret_path, _)) => return _abspath(ret_path.as_str()),
-        Err(e) => return Err(e),
-    }
-}
-
 fn _commonprefix(m: &Vec<&[String]>) -> Result<Vec<String>, String> {
     let s1 = m.into_iter().min().unwrap();
     let s2 = m.into_iter().max().unwrap();
@@ -316,18 +508,6 @@ fn _relpath(path_str: &str, start: &str) -> String {
         return ".".to_string();
     }
     _inner_join(rel_list[0], &rel_list[1..])
-}
-
-fn _inner_split(path_str: &str) -> Result<(String, String), String> {
-    let (mut head, tail) = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
-        Some(v) => path_str.split_at(v + 1),
-        None => ("", path_str),
-    };
-    let head_sep = numsep!(head.len());
-    if !head.is_empty() && head != head_sep {
-        head = head.trim_end_matches(MAIN_SEPARATOR);
-    }
-    return Ok((head.to_string(), tail.to_string()));
 }
 
 fn _split<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
@@ -562,26 +742,21 @@ fn init_mod(m: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfunction]
-    #[pyo3(name = "realpath", signature = (path_str, *_py_args, **py_kwargs))]
-    pub fn realpath(py: Python<'_>, path_str: &Bound<'_, PyAny>, _py_args: &Bound<'_, PyTuple>, py_kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Py<PyAny>> {
-        let strict = if py_kwargs.is_some() {
-            let kwargs = py_kwargs.expect("kwargs parse error");
-            match kwargs.get_item("strict").expect("kwargs parse error") {
-                Some(x) => x.extract::<bool>().expect("invalid strict value"),
-                None => false,
-            }
-        } else {
-            false
+    #[pyo3(
+        name = "realpath",
+        signature = (filename, *, strict=None),
+        text_signature = "(filename, *, strict=False)"
+    )]
+    pub fn realpath(py: Python<'_>, filename: &Bound<'_, PyAny>, strict: Option<&Bound<'_, PyAny>>) -> PyResult<Py<PyAny>> {
+        let mode = realpath_mode(py, strict)?;
+        let (arg_str, is_bytes) = match realpath_arg(filename) {
+            Some(arg) => arg,
+            None => return realpath_fallback(py, filename, strict),
         };
-        let arg_str = pyobj2str(path_str);
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
-        }
-        let (arg_str, is_bytes) = arg_str.unwrap();
-        match _realpath(arg_str.as_str(), strict) {
+        match _realpath(arg_str.as_str(), mode) {
             Ok(s) => str2pyobj!(py, s.as_str(), is_bytes),
-            Err(e) => Err(e),
+            Err(RealpathError::NonUtf8) => realpath_fallback(py, filename, strict),
+            Err(e) => Err(realpath_error(py, e, is_bytes)),
         }
     }
 
@@ -636,8 +811,14 @@ fn init_mod(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use std::env::current_dir;
-    use std::collections::HashMap;
-    use super::{_abspath, _dirname, _joinrealpath, _realpath};
+    use super::{_abspath, _dirname, _realpath, RealpathError, RealpathMode};
+
+    const ALL_MODES: [RealpathMode; 4] = [
+        RealpathMode::NonStrict,
+        RealpathMode::AllowMissing,
+        RealpathMode::AllButLast,
+        RealpathMode::Strict,
+    ];
 
     #[test]
     fn abspath() {
@@ -678,15 +859,58 @@ mod tests {
 
     #[test]
     fn realpath() {
-        let fname = "//";
-        let result_str = _realpath(fname, false).unwrap();
-        assert_eq!(result_str, "/");
+        let cwd = current_dir().unwrap().to_str().unwrap().to_string();
+        for mode in ALL_MODES {
+            assert_eq!(_realpath("/", mode), Ok("/".to_string()));
+            assert_eq!(_realpath("//", mode), Ok("/".to_string()));
+            assert_eq!(_realpath("", mode), Ok(cwd.clone()));
+            assert_eq!(_realpath(".", mode), Ok(cwd.clone()));
+        }
     }
 
     #[test]
-    fn test_joinrealpath() {
-        let fname = "//";
-        let ret = _joinrealpath("", fname, false, &HashMap::new()).expect("joinrealpath error");
-        assert_eq!(ret, ("/".to_string(), true));
+    fn realpath_missing() {
+        let missing_dir = "/fpath-nonexistent-dir";
+        let missing_file = "/fpath-nonexistent-dir/file";
+
+        // only the last component is missing
+        for mode in [RealpathMode::NonStrict, RealpathMode::AllowMissing, RealpathMode::AllButLast] {
+            assert_eq!(_realpath(missing_dir, mode), Ok(missing_dir.to_string()));
+        }
+        assert_eq!(
+            _realpath(missing_dir, RealpathMode::Strict),
+            Err(RealpathError::os(libc::ENOENT, missing_dir))
+        );
+
+        // a non-last component is missing
+        for mode in [RealpathMode::NonStrict, RealpathMode::AllowMissing] {
+            assert_eq!(_realpath(missing_file, mode), Ok(missing_file.to_string()));
+        }
+        for mode in [RealpathMode::AllButLast, RealpathMode::Strict] {
+            assert_eq!(
+                _realpath(missing_file, mode),
+                Err(RealpathError::os(libc::ENOENT, missing_dir))
+            );
+        }
+    }
+
+    #[test]
+    fn realpath_nonterminal_file() {
+        // `cargo test` runs in the crate root, where Cargo.toml is a regular file.
+        let file = _abspath("Cargo.toml").unwrap();
+        for path in ["Cargo.toml/", "Cargo.toml/.", "Cargo.toml/..", "Cargo.toml/x"] {
+            assert!(_realpath(path, RealpathMode::NonStrict).is_ok());
+            for mode in [RealpathMode::AllowMissing, RealpathMode::AllButLast, RealpathMode::Strict] {
+                assert_eq!(_realpath(path, mode), Err(RealpathError::os(libc::ENOTDIR, &file)));
+            }
+        }
+    }
+
+    #[test]
+    fn realpath_embedded_nul() {
+        for mode in ALL_MODES {
+            assert_eq!(_realpath("/\0", mode), Err(RealpathError::EmbeddedNul));
+            assert_eq!(_realpath("/\0/..", mode), Err(RealpathError::EmbeddedNul));
+        }
     }
 }

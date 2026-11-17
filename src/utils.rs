@@ -7,20 +7,6 @@ macro_rules! numsep {
     )
 }
 
-macro_rules! partition {
-    ( $x:expr, $sep:expr ) => {
-        match memchr::memchr($sep.as_bytes()[0], $x.as_bytes()) {
-            Some(i) => {
-                let (head, tail) = $x.split_at(i+1);
-                (&head[..i], $sep, tail)
-            },
-            None => {
-                ($x, "", "")
-            },
-        }
-    }
-}
-
 macro_rules! str2pyobj {
     ( $py:expr, $s:expr, $is_bytes:expr ) => {
         {
