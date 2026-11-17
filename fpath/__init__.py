@@ -11,6 +11,7 @@ def abspath(path):
 
 
 basename = _fpath.basename
+commonpath = _fpath.commonpath
 realpath = _fpath.realpath
 dirname = _fpath.dirname
 isabs = _fpath.isabs
@@ -70,7 +71,6 @@ def relpath(path, start=None):
 
 
 # not support methods by fpath module
-commonpath = ospath.commonpath
 commonprefix = ospath.commonprefix
 curdir = ospath.curdir
 pardir = ospath.pardir

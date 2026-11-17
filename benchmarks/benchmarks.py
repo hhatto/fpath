@@ -72,6 +72,28 @@ def bench_two_arg(arg):
                     func(B_DIR_PATH, B_FILE_PATH)
         print("=*=" * 40)
 
+def bench_list_arg(arg):
+    for funcname in ("commonpath", ):
+        if arg is not None and arg != funcname:
+            continue
+        n = N
+        with Benchmarker(n, width=30) as b:
+            @b("native.%s" % (funcname))
+            def _(bm):
+                func = getattr(os.path, funcname)
+                for i in bm:
+                    func([DIR_PATH, FILE_PATH])
+                    func([B_DIR_PATH, B_FILE_PATH])
+
+            @b("rust.%s" % (funcname))
+            def _(bm):
+                func = getattr(fpath, funcname)
+                for i in bm:
+                    func([DIR_PATH, FILE_PATH])
+                    func([B_DIR_PATH, B_FILE_PATH])
+        print("=*=" * 40)
+
 arg = sys.argv[-1] if len(sys.argv) >= 2 else None
 bench_one_arg(arg)
 bench_two_arg(arg)
+bench_list_arg(arg)
