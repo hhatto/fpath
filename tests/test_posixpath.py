@@ -151,7 +151,6 @@ class PosixPathTest(unittest.TestCase):
         self.splitextTest("........", "........", "")
         self.splitextTest("", "", "")
 
-    @unittest.skip("splitroot is not support by fpath module")
     def test_splitroot(self):
         f = posixpath.splitroot
         self.assertEqual(f(''), ('', '', ''))
@@ -307,9 +306,17 @@ class PosixPathTest(unittest.TestCase):
         finally:
             os.lstat = save_lstat
 
-    @unittest.skip("is_junction is not support by fpath module")
     def test_isjunction(self):
         self.assertFalse(posixpath.isjunction(ABSTFN))
+
+    def test_isdevdrive(self):
+        self.assertFalse(posixpath.isdevdrive(ABSTFN))
+
+    def test_all_names(self):
+        # fpath provides every public name of os.path.
+        missing = [name for name in os.path.__all__
+                   if not hasattr(posixpath, name)]
+        self.assertEqual(missing, [])
 
     def test_expanduser(self):
         self.assertEqual(posixpath.expanduser("foo"), "foo")
@@ -1097,7 +1104,6 @@ class PathLikeTests(unittest.TestCase):
     def test_path_splitdrive(self):
         self.assertPathEqual(self.path.splitdrive)
 
-    @unittest.skip("splitroot is not support by fpath module")
     def test_path_splitroot(self):
         self.assertPathEqual(self.path.splitroot)
 
