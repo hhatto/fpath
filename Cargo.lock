@@ -44,6 +44,7 @@ dependencies = [
 name = "fpath"
 version = "0.1.2"
 dependencies = [
+ "libc",
  "memchr",
  "pyo3",
  "shellexpand",
