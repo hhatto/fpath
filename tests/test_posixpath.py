@@ -83,18 +83,28 @@ class PosixPathTest(unittest.TestCase):
             safe_rmdir(os_helper.TESTFN + suffix)
 
     def test_join(self):
-        self.assertEqual(posixpath.join("/foo", "bar", "/bar", "baz"),
-                         "/bar/baz")
-        self.assertEqual(posixpath.join("/foo", "bar", "baz"), "/foo/bar/baz")
-        self.assertEqual(posixpath.join("/foo/", "bar/", "baz/"),
-                         "/foo/bar/baz/")
+        fn = posixpath.join
+        self.assertEqual(fn("/foo", "bar", "/bar", "baz"), "/bar/baz")
+        self.assertEqual(fn("/foo", "bar", "baz"),         "/foo/bar/baz")
+        self.assertEqual(fn("/foo/", "bar/", "baz/"),      "/foo/bar/baz/")
 
-        self.assertEqual(posixpath.join(b"/foo", b"bar", b"/bar", b"baz"),
-                         b"/bar/baz")
-        self.assertEqual(posixpath.join(b"/foo", b"bar", b"baz"),
-                         b"/foo/bar/baz")
-        self.assertEqual(posixpath.join(b"/foo/", b"bar/", b"baz/"),
-                         b"/foo/bar/baz/")
+        self.assertEqual(fn(b"/foo", b"bar", b"/bar", b"baz"), b"/bar/baz")
+        self.assertEqual(fn(b"/foo", b"bar", b"baz"),          b"/foo/bar/baz")
+        self.assertEqual(fn(b"/foo/", b"bar/", b"baz/"),       b"/foo/bar/baz/")
+
+        self.assertEqual(fn("a", ""),          "a/")
+        self.assertEqual(fn("a", "", ""),      "a/")
+        self.assertEqual(fn("a", "b"),         "a/b")
+        self.assertEqual(fn("a", "b/"),        "a/b/")
+        self.assertEqual(fn("a/", "b"),        "a/b")
+        self.assertEqual(fn("a/", "b/"),       "a/b/")
+        self.assertEqual(fn("a", "b/c", "d"),  "a/b/c/d")
+        self.assertEqual(fn("a", "b//c", "d"), "a/b//c/d")
+        self.assertEqual(fn("a", "b/c/", "d"), "a/b/c/d")
+        self.assertEqual(fn("/a", "b"),        "/a/b")
+        self.assertEqual(fn("/a/", "b"),       "/a/b")
+        self.assertEqual(fn("a", "/b", "c"),   "/b/c")
+        self.assertEqual(fn("a", "/b", "/c"),  "/c")
 
     def test_split(self):
         self.assertEqual(posixpath.split("/foo/bar"), ("/foo", "bar"))
@@ -317,6 +327,22 @@ class PosixPathTest(unittest.TestCase):
         missing = [name for name in os.path.__all__
                    if not hasattr(posixpath, name)]
         self.assertEqual(missing, [])
+
+    def test_undecodable_path(self):
+        # fpath passes a str with lone surrogates and bytes that are not
+        # valid UTF-8 to os.path.
+        for path in ["/a/\udcff.txt", "\udcff", "~/\udcff", "$HOME/\udcff",
+                     b"/a/\xff.txt", b"\xff", b"~/\xff", b"$HOME/\xff"]:
+            for name in ["abspath", "basename", "dirname", "isabs", "split",
+                         "splitext", "expanduser", "expandvars", "exists",
+                         "islink", "realpath"]:
+                with self.subTest(name=name, path=path):
+                    self.assertEqual(getattr(posixpath, name)(path),
+                                     getattr(os.path, name)(path))
+        self.assertEqual(posixpath.join("a", "\udcff"), "a/\udcff")
+        self.assertEqual(posixpath.join(b"a", b"\xff"), b"a/\xff")
+        self.assertEqual(posixpath.relpath("/a/\udcff", "/a"), "\udcff")
+        self.assertEqual(posixpath.relpath(b"/a/\xff", b"/a"), b"\xff")
 
     def test_expanduser(self):
         self.assertEqual(posixpath.expanduser("foo"), "foo")
@@ -965,6 +991,7 @@ class PosixPathTest(unittest.TestCase):
 
     def test_relpath(self):
         curdir = os.path.split(os.getcwd())[-1]
+        self.assertRaises(TypeError, posixpath.relpath, None)
         self.assertRaises(ValueError, posixpath.relpath, "")
         self.assertEqual(posixpath.relpath("a"), "a")
         self.assertEqual(posixpath.relpath(posixpath.abspath("a")), "a")

@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::env::current_dir;
 use std::path::{Path, MAIN_SEPARATOR};
 use pyo3::prelude::*;
+use pyo3::call::PyCallArgs;
 use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyBytes, PyDict, PyString, PyTuple};
 use pyo3::exceptions;
@@ -15,9 +16,61 @@ use uzers::{get_user_by_uid, get_user_by_name, get_current_uid};
 
 #[macro_use]
 mod utils;
-use utils::pyobj2str;
 
 const SEP: u8 = MAIN_SEPARATOR as u8;
+
+static OS_FSPATH: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+static OS_PATH: PyOnceLock<Py<PyModule>> = PyOnceLock::new();
+
+fn os_path_module(py: Python<'_>) -> PyResult<&Bound<'_, PyModule>> {
+    let ospath = OS_PATH.get_or_try_init(py, || py.import("os.path").map(Bound::unbind))?;
+    Ok(ospath.bind(py))
+}
+
+/// Calls `os.path.<name>(*args)`.
+///
+/// fpath handles a path only if it is an exact str without lone surrogates or
+/// an exact bytes that is valid UTF-8. Everything else, e.g. a str with lone
+/// surrogates, non-UTF-8 bytes, subclasses of str and bytes, and invalid
+/// arguments, is delegated to os.path so that the result or the error is the
+/// same as os.path.
+fn os_path<'py>(py: Python<'py>, name: &str, args: impl PyCallArgs<'py>) -> PyResult<Py<PyAny>> {
+    Ok(os_path_module(py)?.call_method1(name, args)?.unbind())
+}
+
+/// `os.fspath(obj)`, skipping the call for exact str and bytes.
+fn fspath<'py>(obj: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    if obj.is_exact_instance_of::<PyString>() || obj.is_exact_instance_of::<PyBytes>() {
+        return Ok(obj.clone());
+    }
+    OS_FSPATH.import(obj.py(), "os", "fspath")?.call1((obj,))
+}
+
+/// Returns the contents of `path` and whether it is bytes, if fpath handles
+/// it (see `os_path()`).
+fn utf8_path<'a>(path: &'a Bound<'_, PyAny>) -> Option<(&'a str, bool)> {
+    if let Ok(s) = path.cast_exact::<PyString>() {
+        // to_str() fails for a str with lone surrogates
+        s.to_str().ok().map(|s| (s, false))
+    } else if let Ok(b) = path.cast_exact::<PyBytes>() {
+        str::from_utf8(b.as_bytes()).ok().map(|s| (s, true))
+    } else {
+        None
+    }
+}
+
+/// Calls `f` with `os.fspath(path)`, its contents and whether it is bytes, if
+/// fpath handles the path. Returns None if fpath does not handle it, if
+/// os.fspath() raises (os.path then raises its own error), or if `f` returns
+/// None. The caller then delegates to os.path.
+fn with_path<'py, R>(
+    path: &Bound<'py, PyAny>,
+    f: impl FnOnce(&Bound<'py, PyAny>, &str, bool) -> Option<R>,
+) -> Option<R> {
+    let path = fspath(path).ok()?;
+    let (path_str, is_bytes) = utf8_path(&path)?;
+    f(&path, path_str, is_bytes)
+}
 
 
 #[inline(always)]
@@ -260,51 +313,34 @@ fn realpath_mode(py: Python<'_>, strict: Option<&Bound<'_, PyAny>>) -> PyResult<
     }
 }
 
-/// Converts the `filename` argument of `realpath()`. Returns None for the
-/// arguments that fpath can not handle (e.g. undecodable file names or
-/// invalid types).
-fn realpath_arg(obj: &Bound<'_, PyAny>) -> Option<(String, bool)> {
-    match obj.cast::<PyString>() {
-        // to_str() fails for a str with lone surrogates
-        Ok(s) => s.to_str().ok().map(|s| (s.to_string(), false)),
-        Err(_) => pyobj2str(obj).ok(),
-    }
-}
-
 /// Delegates to `os.path.realpath()`.
 fn realpath_fallback(
     py: Python<'_>,
     filename: &Bound<'_, PyAny>,
     strict: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
-    let realpath = py.import("os")?.getattr("path")?.getattr("realpath")?;
     let kwargs = PyDict::new(py);
     if let Some(strict) = strict {
         kwargs.set_item("strict", strict)?;
     }
-    Ok(realpath.call((filename,), Some(&kwargs))?.unbind())
+    Ok(os_path_module(py)?.call_method("realpath", (filename,), Some(&kwargs))?.unbind())
 }
 
-fn realpath_error(py: Python<'_>, err: RealpathError, is_bytes: bool) -> PyErr {
-    match err {
-        RealpathError::Os { errno, filename } => {
-            let new_oserror = || -> PyResult<PyErr> {
-                // OSError(errno, ...) creates the subclass for the errno,
-                // e.g. FileNotFoundError for ENOENT.
-                let oserror = py.get_type::<exceptions::PyOSError>();
-                let strerror = py.import("os")?.call_method1("strerror", (errno,))?;
-                let exc = match filename {
-                    Some(f) if is_bytes => oserror.call1((errno, strerror, PyBytes::new(py, f.as_bytes())))?,
-                    Some(f) => oserror.call1((errno, strerror, PyString::new(py, &f)))?,
-                    None => oserror.call1((errno, strerror))?,
-                };
-                Ok(PyErr::from_value(exc))
-            };
-            new_oserror().unwrap_or_else(|e| e)
-        }
-        RealpathError::EmbeddedNul => exceptions::PyValueError::new_err("embedded null byte"),
-        RealpathError::NonUtf8 => exceptions::PyValueError::new_err("path is not valid UTF-8"),
-    }
+/// Creates `OSError(errno, os.strerror(errno)[, filename])`.
+fn realpath_error(py: Python<'_>, errno: i32, filename: Option<String>, is_bytes: bool) -> PyErr {
+    let new_oserror = || -> PyResult<PyErr> {
+        // OSError(errno, ...) creates the subclass for the errno,
+        // e.g. FileNotFoundError for ENOENT.
+        let oserror = py.get_type::<exceptions::PyOSError>();
+        let strerror = py.import("os")?.call_method1("strerror", (errno,))?;
+        let exc = match filename {
+            Some(f) if is_bytes => oserror.call1((errno, strerror, PyBytes::new(py, f.as_bytes())))?,
+            Some(f) => oserror.call1((errno, strerror, PyString::new(py, &f)))?,
+            None => oserror.call1((errno, strerror))?,
+        };
+        Ok(PyErr::from_value(exc))
+    };
+    new_oserror().unwrap_or_else(|e| e)
 }
 
 pub fn _inner_join(path_str: &str, path_list: &[&str]) -> String {
@@ -323,14 +359,15 @@ pub fn _inner_join(path_str: &str, path_list: &[&str]) -> String {
     ret_path
 }
 
-fn _abspath(path_str: &str) -> Result<String, PyErr> {
+/// Returns None when `os.path.abspath()` has to be used instead: when the
+/// current directory can not be got (os.getcwd() then raises the error) or is
+/// not UTF-8.
+fn _abspath(path_str: &str) -> Option<String> {
     if _isabs(path_str) {
-        return Ok(_normpath(path_str));
+        return Some(_normpath(path_str));
     }
-    match current_dir() {
-        Ok(c) => Ok(_normpath(c.join(path_str).to_string_lossy().into_owned().as_str())),
-        Err(e) => Err(exceptions::PyOSError::new_err(format!("{}", e))),
-    }
+    let path = current_dir().ok()?.join(path_str).into_os_string().into_string().ok()?;
+    Some(_normpath(&path))
 }
 
 fn _basename(py: Python<'_>, path_str: &str, is_bytes: bool) -> Py<PyAny> {
@@ -363,40 +400,32 @@ fn _exists(path_str: &str) -> bool {
     Path::new(path_str).exists()
 }
 
-// NOTE: use shellexpand::tilde?
-fn _expanduser(path_str: &str) -> String {
-    let i = match memchr::memchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
-        Some(v) => v,
-        None => path_str.len(),
-    };
-
-    let userhome: String = if i == 1 {
-        match env::var("HOME") {
-            Ok(v) => v,
-            Err(_) => {
-                match get_user_by_uid(get_current_uid() as u32) {
-                    Some(u) => u.home_dir().to_str().unwrap().to_string(),
-                    None => path_str.to_string(),
-                }
-            }
+/// Expands a path that starts with `~`. Returns None when
+/// `os.path.expanduser()` has to be used instead: when the home directory is
+/// not UTF-8.
+fn _expanduser(path_str: &str) -> Option<String> {
+    let i = memchr::memchr(SEP, path_str.as_bytes()).unwrap_or(path_str.len());
+    let userhome = if i == 1 {
+        match env::var_os("HOME") {
+            Some(home) => home.into_string().ok()?,
+            None => match get_user_by_uid(get_current_uid()) {
+                Some(u) => u.home_dir().to_str()?.to_string(),
+                None => path_str.to_string(),
+            },
         }
     } else {
-        let name = str::from_utf8(&path_str.as_bytes()[1..i]).unwrap();
-        match get_user_by_name(name) {
-            Some(u) => u.home_dir().to_str().unwrap().to_string(),
+        match get_user_by_name(&path_str[1..i]) {
+            Some(u) => u.home_dir().to_str()?.to_string(),
             None => path_str.to_string(),
         }
     };
 
-    let mut ret_userhome = userhome.trim_end_matches(MAIN_SEPARATOR).to_string();
-    let strip_path_str = str::from_utf8(&path_str.as_bytes()[i..]).unwrap();
-    ret_userhome.push_str(strip_path_str);
-
-    if ret_userhome.is_empty() {
-        MAIN_SEPARATOR.to_string()
-    } else {
-        ret_userhome
+    let mut ret = userhome.trim_end_matches(MAIN_SEPARATOR).to_string();
+    ret.push_str(&path_str[i..]);
+    if ret.is_empty() {
+        ret.push(MAIN_SEPARATOR);
     }
+    Some(ret)
 }
 
 fn _expandvars(path_str: &str) -> String {
@@ -411,30 +440,20 @@ fn _isabs(path_str: &str) -> bool {
     path_str.starts_with(MAIN_SEPARATOR)
 }
 
-fn _join(py: Python<'_>, path_str: &str, path_list: &Bound<'_, PyTuple>, is_bytes: bool) -> PyResult<Py<PyAny>> {
-    let mut ret_path = String::from(path_str);
-    for x in path_list.iter() {
-        let b = pyobj2str(&x);
-        match b {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
+/// `posixpath.join(a, *p)` for the paths that fpath handles. Returns None
+/// otherwise.
+fn join_fast(py: Python<'_>, a: &Bound<'_, PyAny>, p: &Bound<'_, PyTuple>) -> Option<PyResult<Py<PyAny>>> {
+    with_path(a, |a, a_str, is_bytes| {
+        if p.is_empty() {
+            return Some(Ok(a.clone().unbind()));
         }
-        let (b, b_is_bytes) = b.unwrap();
-        if is_bytes != b_is_bytes {
-            return Err(exceptions::PyTypeError::new_err("Can't mix strings and bytes in path components"));
-        }
-
-        if b.starts_with(MAIN_SEPARATOR) {
-            ret_path = b.to_string();
-        } else if ret_path.is_empty() || ret_path.ends_with(MAIN_SEPARATOR) {
-            ret_path.push_str(b.as_str());
-        } else {
-            ret_path.push(MAIN_SEPARATOR);
-            ret_path.push_str(b.as_str());
-        }
-    }
-
-    str2pyobj!(py, ret_path.as_str(), is_bytes)
+        let p = p.iter().map(|b| fspath(&b)).collect::<PyResult<Vec<_>>>().ok()?;
+        let parts = p
+            .iter()
+            .map(|b| utf8_path(b).filter(|&(_, b_is_bytes)| b_is_bytes == is_bytes).map(|(b, _)| b))
+            .collect::<Option<Vec<&str>>>()?;
+        Some(str2pyobj!(py, _inner_join(a_str, &parts).as_str(), is_bytes))
+    })
 }
 
 fn _normpath(path_str: &str) -> String {
@@ -525,27 +544,23 @@ fn _commonpath(paths: &[&[u8]]) -> Option<Vec<u8>> {
     Some(ret)
 }
 
-static OS_FSPATH: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
-static OS_PATH_COMMONPATH: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
-
 /// Delegates to `os.path.commonpath()`, e.g. to raise the same errors.
 fn commonpath_fallback(py: Python<'_>, paths: &[Bound<'_, PyAny>]) -> PyResult<Py<PyAny>> {
-    let commonpath = OS_PATH_COMMONPATH.import(py, "os.path", "commonpath")?;
-    Ok(commonpath.call1((PyTuple::new(py, paths)?,))?.unbind())
+    os_path(py, "commonpath", (PyTuple::new(py, paths)?,))
 }
 
-fn _relpath(path_str: &str, start: &str) -> String {
-    let start_list: Vec<String> = _abspath(start)
-        .unwrap()
+/// Returns None when `os.path.relpath()` has to be used instead (see
+/// `_abspath()`).
+fn _relpath(path_str: &str, start: &str) -> Option<String> {
+    let start_abs = _abspath(start)?;
+    let path_abs = _abspath(path_str)?;
+    let start_list: Vec<String> = start_abs
         .split(MAIN_SEPARATOR)
-        .into_iter()
         .filter(|x| !x.is_empty())
         .map(|x| x.to_string())
         .collect();
-    let path_list: Vec<String> = _abspath(path_str)
-        .unwrap()
+    let path_list: Vec<String> = path_abs
         .split(MAIN_SEPARATOR)
-        .into_iter()
         .filter(|x| !x.is_empty())
         .map(|x| x.to_string())
         .collect();
@@ -555,12 +570,12 @@ fn _relpath(path_str: &str, start: &str) -> String {
     let plist_list: Vec<&str> = path_list[i..].iter().map(|x| x.as_str()).collect();
     let rel_list: Vec<&str> = (0..num).map(|_| "..").chain(plist_list).collect();
     if rel_list.len() == 0 {
-        return ".".to_string();
+        return Some(".".to_string());
     }
-    _inner_join(rel_list[0], &rel_list[1..])
+    Some(_inner_join(rel_list[0], &rel_list[1..]))
 }
 
-fn _split<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
+fn _split<'a>(path_str: &'a str) -> (&'a str, &'a str) {
     let (mut head, tail) = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => path_str.split_at(v + 1),
         None => ("", path_str),
@@ -569,10 +584,10 @@ fn _split<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
     if !head.is_empty() && head != head_sep {
         head = head.trim_end_matches(MAIN_SEPARATOR);
     }
-    return Ok((head, tail));
+    (head, tail)
 }
 
-fn _splitext<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
+fn _splitext<'a>(path_str: &'a str) -> (&'a str, &'a str) {
     let sep_index = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => v as i32,
         None => -1,
@@ -588,20 +603,18 @@ fn _splitext<'a>(path_str: &'a str) -> Result<(&'a str, &'a str), String> {
             match path_str.chars().nth(filename_index as usize) {
                 Some(c) => {
                     if c != '.' {
-                        let (head, tail) = path_str.split_at(ext_index as usize);
-                        return Ok((head, tail));
+                        return path_str.split_at(ext_index as usize);
                     }
                 }
                 None => {
-                    let (head, tail) = path_str.split_at(ext_index as usize);
-                    return Ok((head, tail));
+                    return path_str.split_at(ext_index as usize);
                 }
             };
             filename_index += 1
         }
     }
 
-    return Ok((path_str, ""));
+    (path_str, "")
 }
 
 #[pymodule]
@@ -610,47 +623,26 @@ fn init_mod(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     #[pyfunction]
     #[pyo3(name = "abspath")]
-    pub fn abspath(py: Python<'_>, path_str: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let arg_str = pyobj2str(path_str);
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
-        }
-        let (arg_str, is_bytes) = arg_str.unwrap();
-
-        match _abspath(arg_str.as_str()) {
-            Ok(s) => {
-                str2pyobj!(py, s.as_str(), is_bytes)
-            }
-            Err(e) => Err(exceptions::PyOSError::new_err(e)),
-        }
+    pub fn abspath(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        with_path(path, |_, path_str, is_bytes| {
+            let ret = _abspath(path_str)?;
+            Some(str2pyobj!(py, ret.as_str(), is_bytes))
+        })
+        .unwrap_or_else(|| os_path(py, "abspath", (path,)))
     }
 
     #[pyfunction]
     #[pyo3(name = "basename")]
-    pub fn basename(py: Python<'_>, path_str: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let arg_str = pyobj2str(path_str);
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
-        }
-        let (arg_str, is_bytes) = arg_str.unwrap();
-        Ok(_basename(py, arg_str.as_str(), is_bytes))
+    pub fn basename(py: Python<'_>, p: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        with_path(p, |_, path_str, is_bytes| Some(Ok(_basename(py, path_str, is_bytes))))
+            .unwrap_or_else(|| os_path(py, "basename", (p,)))
     }
 
     #[pyfunction]
     #[pyo3(name = "commonpath")]
     pub fn commonpath(py: Python<'_>, paths: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         // paths = tuple(map(os.fspath, paths))
-        let mut items = Vec::new();
-        for item in paths.try_iter()? {
-            let item = item?;
-            if item.is_exact_instance_of::<PyString>() || item.is_exact_instance_of::<PyBytes>() {
-                items.push(item);
-            } else {
-                items.push(OS_FSPATH.import(py, "os", "fspath")?.call1((item,))?);
-            }
-        }
+        let items = paths.try_iter()?.map(|item| fspath(&item?)).collect::<PyResult<Vec<_>>>()?;
 
         // Only handle paths that are all exact str (encodable to UTF-8) or
         // all exact bytes. Everything else, including the error cases, is
@@ -683,142 +675,100 @@ fn init_mod(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     #[pyfunction]
     #[pyo3(name = "dirname")]
-    pub fn dirname(py: Python<'_>, path_str: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let arg_str = pyobj2str(path_str);
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
-        }
-        let (arg_str, is_bytes) = arg_str.unwrap();
-        str2pyobj!(py, _dirname(arg_str.as_str()), is_bytes)
+    pub fn dirname(py: Python<'_>, p: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        with_path(p, |_, path_str, is_bytes| Some(str2pyobj!(py, _dirname(path_str), is_bytes)))
+            .unwrap_or_else(|| os_path(py, "dirname", (p,)))
     }
 
     #[pyfunction]
     #[pyo3(name = "exists")]
-    pub fn exists(path_str: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let arg_str = pyobj2str(path_str);
-        // TODO: from file descriptor
-        //let arg_str = match arg_str {
-        //    Err(e) => {
-        //        // for file descriptor argument
-        //        let gil = Python::acquire_gil();
-        //        let py = gil.python();
-        //        match path_str.extract::<i32>(py) {
-        //            Ok(fd) => {
-        //                let f = unsafe { fs::File::from_raw_fd(fd) };
-        //                Ok(f.exists())
-        //            }
-        //            Err(_) => Err(exceptions::TypeError::py_err(e)),
-        //        }
-        //    }
-        //    Ok(s) => Ok(s.0)
-        //};
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
+    pub fn exists(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<bool> {
+        match with_path(path, |_, path_str, _| Some(_exists(path_str))) {
+            Some(ret) => Ok(ret),
+            // e.g. a file descriptor
+            None => os_path(py, "exists", (path,))?.bind(py).is_truthy(),
         }
-        let (arg_str, _) = arg_str.unwrap();
-        Ok(_exists(arg_str.as_str()))
     }
 
     #[pyfunction]
     #[pyo3(name = "expanduser")]
-    pub fn expanduser(py: Python<'_>, path_str: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let arg_str = pyobj2str(path_str);
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
-        }
-        let (arg_str, is_bytes) = arg_str.unwrap();
-        if !arg_str.starts_with("~") {
-            return str2pyobj!(py, arg_str.as_str(), is_bytes);
-        }
-
-        let ret_str = _expanduser(arg_str.as_str());
-        str2pyobj!(py, ret_str.as_str(), is_bytes)
+    pub fn expanduser(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        with_path(path, |path, path_str, is_bytes| {
+            if !path_str.starts_with('~') {
+                return Some(Ok(path.clone().unbind()));
+            }
+            let ret = _expanduser(path_str)?;
+            Some(str2pyobj!(py, ret.as_str(), is_bytes))
+        })
+        .unwrap_or_else(|| os_path(py, "expanduser", (path,)))
     }
 
     #[pyfunction]
     #[pyo3(name = "expandvars")]
-    pub fn expandvars(py: Python<'_>, path_str: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let arg_str = pyobj2str(path_str);
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
-        }
-        let (arg_str, is_bytes) = arg_str.unwrap();
-        if memchr::memchr(b'$', arg_str.as_bytes()).is_none() {
-            return str2pyobj!(py, arg_str.as_str(), is_bytes);
-        }
-
-        let ret_str = _expandvars(arg_str.as_str());
-        str2pyobj!(py, ret_str.as_str(), is_bytes)
+    pub fn expandvars(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        with_path(path, |path, path_str, is_bytes| {
+            if memchr::memchr(b'$', path_str.as_bytes()).is_none() {
+                return Some(Ok(path.clone().unbind()));
+            }
+            let ret = _expandvars(path_str);
+            Some(str2pyobj!(py, ret.as_str(), is_bytes))
+        })
+        .unwrap_or_else(|| os_path(py, "expandvars", (path,)))
     }
 
     #[pyfunction]
     #[pyo3(name = "isabs")]
-    pub fn isabs(path_str: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let arg_str = pyobj2str(path_str);
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
+    pub fn isabs(py: Python<'_>, s: &Bound<'_, PyAny>) -> PyResult<bool> {
+        match with_path(s, |_, path_str, _| Some(_isabs(path_str))) {
+            Some(ret) => Ok(ret),
+            None => os_path(py, "isabs", (s,))?.bind(py).is_truthy(),
         }
-        let (arg_str, _is_bytes) = arg_str.unwrap();
-        Ok(_isabs(arg_str.as_str()))
     }
 
     #[pyfunction]
     #[pyo3(name = "islink")]
-    pub fn islink(path_str: &Bound<'_, PyAny>) -> PyResult<bool> {
-        let arg_str = pyobj2str(path_str);
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
+    pub fn islink(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<bool> {
+        match with_path(path, |_, path_str, _| Some(_islink(path_str))) {
+            Some(ret) => Ok(ret),
+            None => os_path(py, "islink", (path,))?.bind(py).is_truthy(),
         }
-        let (arg_str, _is_bytes) = arg_str.unwrap();
-        Ok(_islink(arg_str.as_str()))
+    }
+
+    /// Called as `join(a, p)` by `fpath.join(a, *p)`.
+    #[pyfunction]
+    #[pyo3(name = "join")]
+    pub fn join(py: Python<'_>, a: &Bound<'_, PyAny>, p: &Bound<'_, PyTuple>) -> PyResult<Py<PyAny>> {
+        if let Some(ret) = join_fast(py, a, p) {
+            return ret;
+        }
+        let args: Vec<_> = std::iter::once(a.clone()).chain(p.iter()).collect();
+        let args = PyTuple::new(py, args)?;
+        os_path(py, "join", args)
     }
 
     #[pyfunction]
-    #[pyo3(name = "join", text_signature = "(path_str, *args)")]
-    pub fn join(py: Python<'_>, path_str: &Bound<'_, PyAny>, args: &Bound<'_, PyTuple>) -> PyResult<Py<PyAny>> {
-        if args.len() < 1 {
-            let arg_str = pyobj2str(path_str);
-            match arg_str {
-                Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-                _ => {}
+    #[pyo3(name = "relpath", signature = (path, start=None))]
+    pub fn relpath(py: Python<'_>, path: &Bound<'_, PyAny>, start: Option<&Bound<'_, PyAny>>) -> PyResult<Py<PyAny>> {
+        let ret = with_path(path, |_, path_str, is_bytes| {
+            if path_str.is_empty() {
+                // os.path.relpath() raises ValueError
+                return None;
             }
-            let (arg_str, is_bytes) = arg_str.unwrap();
-            return str2pyobj!(py, arg_str.as_str(), is_bytes)
-        }
-
-        let arg_str = pyobj2str(path_str);
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
-        }
-        let (arg_str, is_bytes) = arg_str.unwrap();
-        _join(py, arg_str.as_str(), args, is_bytes)
-    }
-
-    #[pyfunction]
-    #[pyo3(name = "relpath")]
-    pub fn relpath(py: Python<'_>, path_str: &Bound<'_, PyAny>, start: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let arg_str = pyobj2str(path_str);
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
-        }
-        let (arg_str, is_bytes) = arg_str.unwrap();
-
-        let start_str = pyobj2str(start);
-        match start_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
-        }
-        let (start_str, _) = start_str.unwrap();
-
-        str2pyobj!(py, _relpath(arg_str.as_str(), start_str.as_str()).as_str(), is_bytes)
+            let start = match start {
+                Some(start) => Some(fspath(start).ok()?),
+                None => None,
+            };
+            let start_str = match &start {
+                Some(start) => match utf8_path(start)? {
+                    (start_str, start_is_bytes) if start_is_bytes == is_bytes => start_str,
+                    _ => return None,
+                },
+                None => ".",
+            };
+            let ret = _relpath(path_str, start_str)?;
+            Some(str2pyobj!(py, ret.as_str(), is_bytes))
+        });
+        ret.unwrap_or_else(|| os_path(py, "relpath", (path, start)))
     }
 
     #[pyfunction]
@@ -829,45 +779,33 @@ fn init_mod(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )]
     pub fn realpath(py: Python<'_>, filename: &Bound<'_, PyAny>, strict: Option<&Bound<'_, PyAny>>) -> PyResult<Py<PyAny>> {
         let mode = realpath_mode(py, strict)?;
-        let (arg_str, is_bytes) = match realpath_arg(filename) {
-            Some(arg) => arg,
-            None => return realpath_fallback(py, filename, strict),
-        };
-        match _realpath(arg_str.as_str(), mode) {
-            Ok(s) => str2pyobj!(py, s.as_str(), is_bytes),
-            Err(RealpathError::NonUtf8) => realpath_fallback(py, filename, strict),
-            Err(e) => Err(realpath_error(py, e, is_bytes)),
-        }
+        let ret = with_path(filename, |_, path_str, is_bytes| match _realpath(path_str, mode) {
+            Ok(ret) => Some(str2pyobj!(py, ret.as_str(), is_bytes)),
+            Err(RealpathError::Os { errno, filename }) => Some(Err(realpath_error(py, errno, filename, is_bytes))),
+            Err(RealpathError::EmbeddedNul) => Some(Err(exceptions::PyValueError::new_err("embedded null byte"))),
+            Err(RealpathError::NonUtf8) => None,
+        });
+        ret.unwrap_or_else(|| realpath_fallback(py, filename, strict))
     }
 
     #[pyfunction]
     #[pyo3(name = "split")]
-    pub fn split(py: Python<'_>, path_str: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let arg_str = pyobj2str(path_str);
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
-        }
-        let (arg_str, is_bytes) = arg_str.unwrap();
-        match _split(arg_str.as_str()) {
-            Ok((head, tail)) => tuplestr2pyobj!(py, head, tail, is_bytes),
-            Err(e) => Err(exceptions::PyOSError::new_err(e)),
-        }
+    pub fn split(py: Python<'_>, p: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        with_path(p, |_, path_str, is_bytes| {
+            let (head, tail) = _split(path_str);
+            Some(tuplestr2pyobj!(py, head, tail, is_bytes))
+        })
+        .unwrap_or_else(|| os_path(py, "split", (p,)))
     }
 
     #[pyfunction]
     #[pyo3(name = "splitext")]
-    pub fn splitext(py: Python<'_>, path_str: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let arg_str = pyobj2str(path_str);
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
-        }
-        let (arg_str, is_bytes) = arg_str.unwrap();
-        match _splitext(arg_str.as_str()) {
-            Ok((head, tail)) => tuplestr2pyobj!(py, head, tail, is_bytes),
-            Err(e) => Err(exceptions::PyOSError::new_err(e)),
-        }
+    pub fn splitext(py: Python<'_>, p: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        with_path(p, |_, path_str, is_bytes| {
+            let (root, ext) = _splitext(path_str);
+            Some(tuplestr2pyobj!(py, root, ext, is_bytes))
+        })
+        .unwrap_or_else(|| os_path(py, "splitext", (p,)))
     }
 
     m.add_function(wrap_pyfunction!(abspath, m)?)?;
