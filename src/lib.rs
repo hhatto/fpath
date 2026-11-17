@@ -1,5 +1,4 @@
 extern crate memchr;
-extern crate shellexpand;
 
 use std::{env, str};
 use std::borrow::Cow;
@@ -109,7 +108,8 @@ impl RealpathMode {
 enum RealpathError {
     /// Raised as `OSError(errno, os.strerror(errno), filename)`.
     Os { errno: i32, filename: Option<String> },
-    /// Raised as `ValueError`, like `os.lstat()` does.
+    /// The caller falls back to `os.path.realpath()`, which raises
+    /// `ValueError` with the message of `os.lstat()`.
     EmbeddedNul,
     /// A path that can not be handled as UTF-8; the caller falls back to
     /// `os.path.realpath()`.
@@ -401,23 +401,17 @@ fn _exists(path_str: &str) -> bool {
 }
 
 /// Expands a path that starts with `~`. Returns None when
-/// `os.path.expanduser()` has to be used instead: when the home directory is
-/// not UTF-8.
+/// `os.path.expanduser()` has to be used instead: when the user is not found
+/// (it then returns the path unchanged) or the home directory is not UTF-8.
 fn _expanduser(path_str: &str) -> Option<String> {
     let i = memchr::memchr(SEP, path_str.as_bytes()).unwrap_or(path_str.len());
     let userhome = if i == 1 {
         match env::var_os("HOME") {
             Some(home) => home.into_string().ok()?,
-            None => match get_user_by_uid(get_current_uid()) {
-                Some(u) => u.home_dir().to_str()?.to_string(),
-                None => path_str.to_string(),
-            },
+            None => get_user_by_uid(get_current_uid())?.home_dir().to_str()?.to_string(),
         }
     } else {
-        match get_user_by_name(&path_str[1..i]) {
-            Some(u) => u.home_dir().to_str()?.to_string(),
-            None => path_str.to_string(),
-        }
+        get_user_by_name(&path_str[1..i])?.home_dir().to_str()?.to_string()
     };
 
     let mut ret = userhome.trim_end_matches(MAIN_SEPARATOR).to_string();
@@ -428,11 +422,58 @@ fn _expanduser(path_str: &str) -> Option<String> {
     Some(ret)
 }
 
-fn _expandvars(path_str: &str) -> String {
-    match shellexpand::env(path_str) {
-        Ok(v) => v.into(),
-        Err(_) => path_str.to_string(),
+/// Returns the value of the environment variable `name`, or Some(None) if it
+/// is not set. Returns None if the value is not UTF-8.
+fn getenv(name: &str) -> Option<Option<String>> {
+    // os.environ never has such names, but getenv() might find a variable for
+    // a name with "=".
+    if name.is_empty() || name.contains(['=', '\0']) {
+        return Some(None);
     }
+    match env::var_os(name) {
+        Some(value) => value.into_string().ok().map(Some),
+        None => Some(None),
+    }
+}
+
+/// Expands `$name` and `${name}` like `posixpath.expandvars()`: `name` of
+/// `$name` consists of ASCII letters, digits and `_`, and unknown variables are
+/// left unchanged. Returns None when `os.path.expandvars()` has to be used
+/// instead: for an unclosed `${`, which Python 3.14 handles differently from
+/// older versions, and for a value that is not UTF-8.
+fn _expandvars(path_str: &str) -> Option<String> {
+    let mut ret = String::with_capacity(path_str.len());
+    // `path_str[copied..]` is not copied to `ret` yet.
+    let mut copied = 0;
+    let mut i = 0;
+    while let Some(n) = memchr::memchr(b'$', &path_str.as_bytes()[i..]) {
+        let start = i + n;
+        let rest = &path_str[start + 1..];
+        let (name, end) = match rest.strip_prefix('{') {
+            Some(braced) => {
+                let len = braced.find('}')?;
+                // "${" + name + "}"
+                (&braced[..len], start + len + 3)
+            }
+            None => {
+                let len = rest.bytes().take_while(|&c| c.is_ascii_alphanumeric() || c == b'_').count();
+                if len == 0 {
+                    i = start + 1;
+                    continue;
+                }
+                // "$" + name
+                (&rest[..len], start + len + 1)
+            }
+        };
+        if let Some(value) = getenv(name)? {
+            ret.push_str(&path_str[copied..start]);
+            ret.push_str(&value);
+            copied = end;
+        }
+        i = end;
+    }
+    ret.push_str(&path_str[copied..]);
+    Some(ret)
 }
 
 #[inline(always)]
@@ -588,33 +629,14 @@ fn _split<'a>(path_str: &'a str) -> (&'a str, &'a str) {
 }
 
 fn _splitext<'a>(path_str: &'a str) -> (&'a str, &'a str) {
-    let sep_index = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
-        Some(v) => v as i32,
-        None => -1,
-    };
-    let ext_index = match memchr::memrchr('.' as u8, path_str.as_bytes()) {
-        Some(v) => v as i32,
-        None => -1,
-    };
-
-    if ext_index > sep_index {
-        let mut filename_index = sep_index + 1;
-        while filename_index < ext_index {
-            match path_str.chars().nth(filename_index as usize) {
-                Some(c) => {
-                    if c != '.' {
-                        return path_str.split_at(ext_index as usize);
-                    }
-                }
-                None => {
-                    return path_str.split_at(ext_index as usize);
-                }
-            };
-            filename_index += 1
-        }
+    let bytes = path_str.as_bytes();
+    let name_start = memchr::memrchr(SEP, bytes).map_or(0, |i| i + 1);
+    let name = &bytes[name_start..];
+    match memchr::memrchr(b'.', name) {
+        // Leading dots of the file name do not start an extension.
+        Some(dot) if name[..dot].iter().any(|&c| c != b'.') => path_str.split_at(name_start + dot),
+        _ => (path_str, ""),
     }
-
-    (path_str, "")
 }
 
 #[pymodule]
@@ -710,7 +732,7 @@ fn init_mod(m: &Bound<'_, PyModule>) -> PyResult<()> {
             if memchr::memchr(b'$', path_str.as_bytes()).is_none() {
                 return Some(Ok(path.clone().unbind()));
             }
-            let ret = _expandvars(path_str);
+            let ret = _expandvars(path_str)?;
             Some(str2pyobj!(py, ret.as_str(), is_bytes))
         })
         .unwrap_or_else(|| os_path(py, "expandvars", (path,)))
@@ -782,8 +804,7 @@ fn init_mod(m: &Bound<'_, PyModule>) -> PyResult<()> {
         let ret = with_path(filename, |_, path_str, is_bytes| match _realpath(path_str, mode) {
             Ok(ret) => Some(str2pyobj!(py, ret.as_str(), is_bytes)),
             Err(RealpathError::Os { errno, filename }) => Some(Err(realpath_error(py, errno, filename, is_bytes))),
-            Err(RealpathError::EmbeddedNul) => Some(Err(exceptions::PyValueError::new_err("embedded null byte"))),
-            Err(RealpathError::NonUtf8) => None,
+            Err(RealpathError::EmbeddedNul | RealpathError::NonUtf8) => None,
         });
         ret.unwrap_or_else(|| realpath_fallback(py, filename, strict))
     }

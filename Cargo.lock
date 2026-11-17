@@ -3,63 +3,13 @@
 version = 4
 
 [[package]]
-name = "bitflags"
-version = "1.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
-
-[[package]]
-name = "bitflags"
-version = "2.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "327762f6e5a765692301e5bb513e0d9fef63be86bbc14528052b1cd3e6f03e07"
-
-[[package]]
-name = "cfg-if"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
-
-[[package]]
-name = "dirs"
-version = "4.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca3aa72a6f96ea37bbc5aa912f6788242832f75369bdfdadcb0e38423f100059"
-dependencies = [
- "dirs-sys",
-]
-
-[[package]]
-name = "dirs-sys"
-version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b1d1d91c932ef41c0f2663aa8b0ca0342d444d842c06914aa0a7e352d0bada6"
-dependencies = [
- "libc",
- "redox_users",
- "winapi",
-]
-
-[[package]]
 name = "fpath"
 version = "0.1.2"
 dependencies = [
  "libc",
  "memchr",
  "pyo3",
- "shellexpand",
  "uzers",
-]
-
-[[package]]
-name = "getrandom"
-version = "0.2.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be4136b2a15dd319360be1c07d9933517ccf0be8f16bf62a3bee4f0d618df427"
-dependencies = [
- "cfg-if",
- "libc",
- "wasi",
 ]
 
 [[package]]
@@ -73,17 +23,6 @@ name = "libc"
 version = "0.2.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89d92a4743f9a61002fae18374ed11e7973f530cb3a3255fb354818118b2203c"
-
-[[package]]
-name = "libredox"
-version = "0.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85c833ca1e66078851dba29046874e38f08b2c883700aa29a03ddd3b23814ee8"
-dependencies = [
- "bitflags 2.4.1",
- "libc",
- "redox_syscall",
-]
 
 [[package]]
 name = "log"
@@ -160,7 +99,7 @@ dependencies = [
  "proc-macro2",
  "pyo3-macros-backend",
  "quote",
- "syn 3.0.10",
+ "syn",
 ]
 
 [[package]]
@@ -172,7 +111,7 @@ dependencies = [
  "heck",
  "proc-macro2",
  "quote",
- "syn 3.0.10",
+ "syn",
 ]
 
 [[package]]
@@ -182,46 +121,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
 dependencies = [
  "proc-macro2",
-]
-
-[[package]]
-name = "redox_syscall"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4722d768eff46b75989dd134e5c353f0d6296e5aaa3132e776cbdb56be7731aa"
-dependencies = [
- "bitflags 1.3.2",
-]
-
-[[package]]
-name = "redox_users"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a18479200779601e498ada4e8c1e1f50e3ee19deb0259c25825a98b5603b2cb4"
-dependencies = [
- "getrandom",
- "libredox",
- "thiserror",
-]
-
-[[package]]
-name = "shellexpand"
-version = "2.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ccc8076840c4da029af4f87e4e8daeb0fca6b87bbb02e10cb60b791450e11e4"
-dependencies = [
- "dirs",
-]
-
-[[package]]
-name = "syn"
-version = "2.0.39"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23e78b90f2fcf45d3e842032ce32e3f2d1545ba6636271dcbf24fa306d87be7a"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-ident",
 ]
 
 [[package]]
@@ -242,26 +141,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c447be3a2abfa84b2d91680c56600bd6b2873866de27b36ec911be705e291da"
 
 [[package]]
-name = "thiserror"
-version = "1.0.50"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9a7210f5c9a7156bb50aa36aed4c95afb51df0df00713949448cf9e97d382d2"
-dependencies = [
- "thiserror-impl",
-]
-
-[[package]]
-name = "thiserror-impl"
-version = "1.0.50"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "266b2e40bc00e5a6c09c3584011e08b06f123c00362c92b975ba9843aaaa14b8"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.39",
-]
-
-[[package]]
 name = "unicode-ident"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -276,31 +155,3 @@ dependencies = [
  "libc",
  "log",
 ]
-
-[[package]]
-name = "wasi"
-version = "0.11.0+wasi-snapshot-preview1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423"
-
-[[package]]
-name = "winapi"
-version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c839a674fcd7a98952e593242ea400abe93992746761e38641405d28b00f419"
-dependencies = [
- "winapi-i686-pc-windows-gnu",
- "winapi-x86_64-pc-windows-gnu",
-]
-
-[[package]]
-name = "winapi-i686-pc-windows-gnu"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
-
-[[package]]
-name = "winapi-x86_64-pc-windows-gnu"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
