@@ -802,19 +802,6 @@ fn init_mod(m: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfunction]
-    #[pyo3(name = "normpath")]
-    pub fn normpath(py: Python<'_>, path_str: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-        let arg_str = pyobj2str(path_str);
-        match arg_str {
-            Err(e) => return Err(exceptions::PyTypeError::new_err(e)),
-            _ => {}
-        }
-        let (arg_str, is_bytes) = arg_str.unwrap();
-        let ret_str = _normpath(arg_str.as_str());
-        str2pyobj!(py, ret_str.as_str(), is_bytes)
-    }
-
-    #[pyfunction]
     #[pyo3(name = "relpath")]
     pub fn relpath(py: Python<'_>, path_str: &Bound<'_, PyAny>, start: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         let arg_str = pyobj2str(path_str);
@@ -893,7 +880,6 @@ fn init_mod(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(isabs, m)?)?;
     m.add_function(wrap_pyfunction!(islink, m)?)?;
     m.add_function(wrap_pyfunction!(join, m)?)?;
-    m.add_function(wrap_pyfunction!(normpath, m)?)?;
     m.add_function(wrap_pyfunction!(relpath, m)?)?;
     m.add_function(wrap_pyfunction!(realpath, m)?)?;
     m.add_function(wrap_pyfunction!(split, m)?)?;

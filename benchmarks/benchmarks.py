@@ -17,7 +17,7 @@ EXPAND_PATH = "~/$foo/file.txt"
 def bench_one_arg(arg):
     for funcname in ("abspath", "basename", "dirname", "isabs", "islink",
                      "exists", "lexists", "split", "splitext", "relpath",
-                     "normpath", "realpath", "expanduser", "expandvars"):
+                     "realpath", "expanduser", "expandvars"):
         if arg is not None and arg != funcname:
             continue
         # benchmark of file system dependent

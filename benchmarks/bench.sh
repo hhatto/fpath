@@ -4,7 +4,7 @@ printf 'methodname              %%        real[p,r]        user[p,r]        sys[
 
 for funcname in "abspath" "basename" "dirname" "isabs" "islink" \
                 "exists" "lexists" "split" "splitext" "relpath" \
-                "normpath" "realpath" "join" "expanduser" "expandvars" \
+                "realpath" "join" "expanduser" "expandvars" \
                 "commonpath"
 do
     python benchmarks.py -o result.txt $funcname >& /dev/null
