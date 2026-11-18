@@ -5,12 +5,10 @@ Python's os.path module written in Rust
 ## Requirements
 
 * Python 3.13 - 3.15
-* [setuptools-rust](https://github.com/PyO3/setuptools-rust)
-* Nightly Rust
+* Rust 1.88 or later (stable)
 
 ```
-$ pip install setuptools_rust
-$ rustup default nightly
+$ rustup default stable
 ```
 
 
