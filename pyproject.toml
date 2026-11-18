@@ -1,5 +1,6 @@
 [project]
 name = "fpath"
+dynamic = ["version"]
 description = "Fast Path manipulation module written in Rust"
 readme = "README.md"
 license = {text = "MIT"}

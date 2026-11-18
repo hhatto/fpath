@@ -296,15 +296,15 @@ fn realpath_mode(py: Python<'_>, strict: Option<&Bound<'_, PyAny>>) -> PyResult<
         Some(strict) => strict,
         None => return Ok(RealpathMode::NonStrict),
     };
-    if let Some(sentinel) = os_path_sentinel(py, &ALLOW_MISSING, "ALLOW_MISSING")? {
-        if strict.is(sentinel) {
-            return Ok(RealpathMode::AllowMissing);
-        }
+    if let Some(sentinel) = os_path_sentinel(py, &ALLOW_MISSING, "ALLOW_MISSING")?
+        && strict.is(sentinel)
+    {
+        return Ok(RealpathMode::AllowMissing);
     }
-    if let Some(sentinel) = os_path_sentinel(py, &ALL_BUT_LAST, "ALL_BUT_LAST")? {
-        if strict.is(sentinel) {
-            return Ok(RealpathMode::AllButLast);
-        }
+    if let Some(sentinel) = os_path_sentinel(py, &ALL_BUT_LAST, "ALL_BUT_LAST")?
+        && strict.is(sentinel)
+    {
+        return Ok(RealpathMode::AllButLast);
     }
     if strict.is_truthy()? {
         Ok(RealpathMode::Strict)
@@ -387,7 +387,7 @@ fn _basename(py: Python<'_>, path_str: &str, is_bytes: bool) -> Py<PyAny> {
     }
 }
 
-fn _dirname<'a>(path_str: &'a str) -> &'a str {
+fn _dirname(path_str: &str) -> &str {
     let i = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => v + 1,
         None => 0,
@@ -520,11 +520,11 @@ fn _normpath(path_str: &str) -> String {
         "/"
     };
     let mut new_comps: Vec<&str> = vec![];
-    for comp in path_str.split('/').into_iter() {
+    for comp in path_str.split('/') {
         if comp.is_empty() || comp == "." {
             continue;
         }
-        if comp != ".." || (!initial_slashes && new_comps.len() == 0)
+        if comp != ".." || (!initial_slashes && new_comps.is_empty())
             || (!new_comps.is_empty() && *new_comps.last().unwrap() == "..")
         {
             new_comps.push(comp);
@@ -546,8 +546,8 @@ fn _normpath(path_str: &str) -> String {
 }
 
 fn _commonprefix(m: &Vec<&[String]>) -> Result<Vec<String>, String> {
-    let s1 = m.into_iter().min().unwrap();
-    let s2 = m.into_iter().max().unwrap();
+    let s1 = m.iter().min().unwrap();
+    let s2 = m.iter().max().unwrap();
     for (i, c) in s1.iter().enumerate() {
         if c != &s2[i] {
             return Ok(s1[..i].iter().map(|x| x.to_string()).collect());
@@ -622,13 +622,13 @@ fn _relpath(path_str: &str, start: &str) -> Option<String> {
     let num = start_list.len() - i;
     let plist_list: Vec<&str> = path_list[i..].iter().map(|x| x.as_str()).collect();
     let rel_list: Vec<&str> = (0..num).map(|_| "..").chain(plist_list).collect();
-    if rel_list.len() == 0 {
+    if rel_list.is_empty() {
         return Some(".".to_string());
     }
     Some(_inner_join(rel_list[0], &rel_list[1..]))
 }
 
-fn _split<'a>(path_str: &'a str) -> (&'a str, &'a str) {
+fn _split(path_str: &str) -> (&str, &str) {
     let (mut head, tail) = match memchr::memrchr(MAIN_SEPARATOR as u8, path_str.as_bytes()) {
         Some(v) => path_str.split_at(v + 1),
         None => ("", path_str),
@@ -640,7 +640,7 @@ fn _split<'a>(path_str: &'a str) -> (&'a str, &'a str) {
     (head, tail)
 }
 
-fn _splitext<'a>(path_str: &'a str) -> (&'a str, &'a str) {
+fn _splitext(path_str: &str) -> (&str, &str) {
     let bytes = path_str.as_bytes();
     let name_start = memchr::memrchr(SEP, bytes).map_or(0, |i| i + 1);
     let name = &bytes[name_start..];
