@@ -4,24 +4,26 @@ import fpath
 from benchmarker import Benchmarker
 
 N = 1000 * 100
-ABS = b"home/user/path/to/file.txt"
+# Paths are not under /home, which is automounted on macOS and makes file
+# system calls very slow.
+ABS = b"usr/local/path/to/file.txt"
 FILENAME = "file.txt"
-B_FILE_PATH = b"/home/user/path/to/file.txt"
-FILE_PATH = "/home/user/path/to/file.txt"
-DIR_PATH = "/home/user/path/to"
-B_DIR_PATH = b"/home/user/path/to"
-SEPEND_DIR_PATH = "/home/user/path/to/"
+B_FILE_PATH = b"/usr/local/path/to/file.txt"
+FILE_PATH = "/usr/local/path/to/file.txt"
+DIR_PATH = "/usr/local/path/to"
+B_DIR_PATH = b"/usr/local/path/to"
+SEPEND_DIR_PATH = "/usr/local/path/to/"
 B_EXPAND_PATH = b"~/$foo/file.txt"
 EXPAND_PATH = "~/$foo/file.txt"
 
 def bench_one_arg(arg):
     for funcname in ("abspath", "basename", "dirname", "isabs", "islink",
-                     "exists", "lexists", "split", "splitext", "relpath",
+                     "exists", "split", "splitext", "relpath",
                      "realpath", "expanduser", "expandvars"):
         if arg is not None and arg != funcname:
             continue
         # benchmark of file system dependent
-        n = N if funcname not in ("islink", "lexists", "exists", "realpath", "relpath") else 50
+        n = N if funcname not in ("islink", "exists", "realpath", "relpath") else N // 10
         with Benchmarker(n, width=30) as b:
             @b("native.%s" % (funcname), tag=funcname)
             def _(bm):
