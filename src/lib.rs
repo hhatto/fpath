@@ -343,19 +343,24 @@ fn realpath_error(py: Python<'_>, errno: i32, filename: Option<String>, is_bytes
     new_oserror().unwrap_or_else(|e| e)
 }
 
+/// Appends `b` to `ret_path` as `posixpath.join()` does.
+fn join_push(ret_path: &mut String, b: &str) {
+    if b.starts_with(MAIN_SEPARATOR) {
+        ret_path.clear();
+        ret_path.push_str(b);
+    } else if ret_path.is_empty() || ret_path.ends_with(MAIN_SEPARATOR) {
+        ret_path.push_str(b);
+    } else {
+        ret_path.push(MAIN_SEPARATOR);
+        ret_path.push_str(b);
+    }
+}
+
 pub fn _inner_join(path_str: &str, path_list: &[&str]) -> String {
     let mut ret_path = String::from(path_str);
     for b in path_list {
-        if b.starts_with(MAIN_SEPARATOR) {
-            ret_path = b.to_string();
-        } else if ret_path.is_empty() || ret_path.ends_with(MAIN_SEPARATOR) {
-            ret_path.push_str(b);
-        } else {
-            ret_path.push(MAIN_SEPARATOR);
-            ret_path.push_str(b);
-        }
+        join_push(&mut ret_path, b);
     }
-
     ret_path
 }
 
@@ -488,12 +493,19 @@ fn join_fast(py: Python<'_>, a: &Bound<'_, PyAny>, p: &Bound<'_, PyTuple>) -> Op
         if p.is_empty() {
             return Some(Ok(a.clone().unbind()));
         }
-        let p = p.iter().map(|b| fspath(&b)).collect::<PyResult<Vec<_>>>().ok()?;
-        let parts = p
-            .iter()
-            .map(|b| utf8_path(b).filter(|&(_, b_is_bytes)| b_is_bytes == is_bytes).map(|(b, _)| b))
-            .collect::<Option<Vec<&str>>>()?;
-        Some(str2pyobj!(py, _inner_join(a_str, &parts).as_str(), is_bytes))
+        // Append each part directly; collecting the parts into Vecs first made
+        // join() noticeably slower.
+        let mut ret = String::with_capacity(a_str.len() + 32);
+        ret.push_str(a_str);
+        for b in p.iter() {
+            let b = fspath(&b).ok()?;
+            let (b, b_is_bytes) = utf8_path(&b)?;
+            if b_is_bytes != is_bytes {
+                return None;
+            }
+            join_push(&mut ret, b);
+        }
+        Some(str2pyobj!(py, ret.as_str(), is_bytes))
     })
 }
 
@@ -664,7 +676,11 @@ fn init_mod(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[pyo3(name = "commonpath")]
     pub fn commonpath(py: Python<'_>, paths: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
         // paths = tuple(map(os.fspath, paths))
-        let items = paths.try_iter()?.map(|item| fspath(&item?)).collect::<PyResult<Vec<_>>>()?;
+        // A plain loop: collect::<PyResult<Vec<_>>>() was measurably slower.
+        let mut items = Vec::new();
+        for item in paths.try_iter()? {
+            items.push(fspath(&item?)?);
+        }
 
         // Only handle paths that are all exact str (encodable to UTF-8) or
         // all exact bytes. Everything else, including the error cases, is
