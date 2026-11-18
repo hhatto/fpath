@@ -1,15 +1,10 @@
-import os
 import os.path as ospath
 
 from . import _fpath
 
-
-def abspath(path):
-    if isinstance(path, bytes):
-        return ospath.abspath(path)
-    return _fpath.abspath(path)
-
-
+# Paths that fpath does not handle itself, e.g. a str with lone surrogates or
+# bytes that are not valid UTF-8, are passed to os.path.
+abspath = _fpath.abspath
 basename = _fpath.basename
 commonpath = _fpath.commonpath
 realpath = _fpath.realpath
@@ -19,6 +14,9 @@ split = _fpath.split
 splitext = _fpath.splitext
 expanduser = _fpath.expanduser
 expandvars = _fpath.expandvars
+exists = _fpath.exists
+islink = _fpath.islink
+relpath = _fpath.relpath
 
 # Sentinels for realpath(strict=...): ALLOW_MISSING (Python 3.13.4+) and
 # ALL_BUT_LAST (Python 3.15+).
@@ -28,45 +26,8 @@ if hasattr(ospath, "ALL_BUT_LAST"):
     ALL_BUT_LAST = ospath.ALL_BUT_LAST
 
 
-def islink(path):
-    if isinstance(path, bytes):
-        return ospath.islink(path)
-    return _fpath.islink(path)
-
-
 def join(path, *args):
     return _fpath.join(path, args)
-
-
-def exists(path):
-    if type(path) == int:
-        return ospath.exists(path)
-    if (type(path) is bytes and b'\x00' in path) or (type(path) is str and '\x00' in path):
-        return ospath.exists(path)
-    try:
-        return _fpath.exists(path)
-    except Exception:
-        return ospath.exists(path)
-
-
-def relpath(path, start=None):
-    if not path:
-        raise ValueError("no path specified")
-    path_type = type(path)
-    start_type = type(start)
-    if path_type is str and (start is not None and start_type is bytes):
-        raise(TypeError("Can't mix strings and bytes in path components"))
-    elif path_type is bytes and (start is not None and start_type is str):
-        raise(TypeError("Can't mix strings and bytes in path components"))
-    if start is None:
-        start = "."
-    else:
-        os.fspath(start)
-    try:
-        ret = _fpath.relpath(path, start)
-    except TypeError:
-        raise(TypeError('"%s" does not match "%s"' % (path_type, start_type)))
-    return ret
 
 
 # not support methods by fpath module

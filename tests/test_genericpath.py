@@ -414,6 +414,19 @@ class CommonTest(GenericTest):
             self.assertEqual(expandvars(b"$foo$foo"), b"barbar")
             self.assertEqual(expandvars(b"$bar$bar"), b"$bar$bar")
 
+    def test_expandvars_large(self):
+        expandvars = self.pathmodule.expandvars
+        with os_helper.EnvironmentVarGuard() as env:
+            env.clear()
+            env["A"] = "B"
+            n = 100_000
+            self.assertEqual(expandvars('$A'*n), 'B'*n)
+            self.assertEqual(expandvars('${A}'*n), 'B'*n)
+            self.assertEqual(expandvars('$A!'*n), 'B!'*n)
+            self.assertEqual(expandvars('${A}A'*n), 'BA'*n)
+            # fpath passes an unclosed '${' to os.path.expandvars(), which
+            # is quadratic in Python 3.13, so '${'*10*n is not tested.
+
     @unittest.skipUnless(os_helper.FS_NONASCII, 'need os_helper.FS_NONASCII')
     def test_expandvars_nonascii(self):
         expandvars = self.pathmodule.expandvars

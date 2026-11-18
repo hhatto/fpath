@@ -6,9 +6,11 @@ import errno
 import functools
 import os
 import fpath as posixpath
+import random
 import sys
 import unittest
 from fpath import realpath, abspath, dirname, basename
+from test import support
 from test.support import import_helper
 from test.support import os_helper
 from test.support.os_helper import FakePath
@@ -83,18 +85,28 @@ class PosixPathTest(unittest.TestCase):
             safe_rmdir(os_helper.TESTFN + suffix)
 
     def test_join(self):
-        self.assertEqual(posixpath.join("/foo", "bar", "/bar", "baz"),
-                         "/bar/baz")
-        self.assertEqual(posixpath.join("/foo", "bar", "baz"), "/foo/bar/baz")
-        self.assertEqual(posixpath.join("/foo/", "bar/", "baz/"),
-                         "/foo/bar/baz/")
+        fn = posixpath.join
+        self.assertEqual(fn("/foo", "bar", "/bar", "baz"), "/bar/baz")
+        self.assertEqual(fn("/foo", "bar", "baz"),         "/foo/bar/baz")
+        self.assertEqual(fn("/foo/", "bar/", "baz/"),      "/foo/bar/baz/")
 
-        self.assertEqual(posixpath.join(b"/foo", b"bar", b"/bar", b"baz"),
-                         b"/bar/baz")
-        self.assertEqual(posixpath.join(b"/foo", b"bar", b"baz"),
-                         b"/foo/bar/baz")
-        self.assertEqual(posixpath.join(b"/foo/", b"bar/", b"baz/"),
-                         b"/foo/bar/baz/")
+        self.assertEqual(fn(b"/foo", b"bar", b"/bar", b"baz"), b"/bar/baz")
+        self.assertEqual(fn(b"/foo", b"bar", b"baz"),          b"/foo/bar/baz")
+        self.assertEqual(fn(b"/foo/", b"bar/", b"baz/"),       b"/foo/bar/baz/")
+
+        self.assertEqual(fn("a", ""),          "a/")
+        self.assertEqual(fn("a", "", ""),      "a/")
+        self.assertEqual(fn("a", "b"),         "a/b")
+        self.assertEqual(fn("a", "b/"),        "a/b/")
+        self.assertEqual(fn("a/", "b"),        "a/b")
+        self.assertEqual(fn("a/", "b/"),       "a/b/")
+        self.assertEqual(fn("a", "b/c", "d"),  "a/b/c/d")
+        self.assertEqual(fn("a", "b//c", "d"), "a/b//c/d")
+        self.assertEqual(fn("a", "b/c/", "d"), "a/b/c/d")
+        self.assertEqual(fn("/a", "b"),        "/a/b")
+        self.assertEqual(fn("/a/", "b"),       "/a/b")
+        self.assertEqual(fn("a", "/b", "c"),   "/b/c")
+        self.assertEqual(fn("a", "/b", "/c"),  "/c")
 
     def test_split(self):
         self.assertEqual(posixpath.split("/foo/bar"), ("/foo", "bar"))
@@ -318,6 +330,54 @@ class PosixPathTest(unittest.TestCase):
                    if not hasattr(posixpath, name)]
         self.assertEqual(missing, [])
 
+    def test_undecodable_path(self):
+        # fpath passes a str with lone surrogates and bytes that are not
+        # valid UTF-8 to os.path.
+        for path in ["/a/\udcff.txt", "\udcff", "~/\udcff", "$HOME/\udcff",
+                     b"/a/\xff.txt", b"\xff", b"~/\xff", b"$HOME/\xff"]:
+            for name in ["abspath", "basename", "dirname", "isabs", "split",
+                         "splitext", "expanduser", "expandvars", "exists",
+                         "islink", "realpath"]:
+                with self.subTest(name=name, path=path):
+                    self.assertEqual(getattr(posixpath, name)(path),
+                                     getattr(os.path, name)(path))
+        self.assertEqual(posixpath.join("a", "\udcff"), "a/\udcff")
+        self.assertEqual(posixpath.join(b"a", b"\xff"), b"a/\xff")
+        self.assertEqual(posixpath.relpath("/a/\udcff", "/a"), "\udcff")
+        self.assertEqual(posixpath.relpath(b"/a/\xff", b"/a"), b"\xff")
+
+    def test_splitext_nonascii(self):
+        self.assertEqual(posixpath.splitext("日本/..a"), ("日本/..a", ""))
+        self.assertEqual(posixpath.splitext("日本/.a.b"), ("日本/.a", ".b"))
+        self.assertEqual(posixpath.splitext("日本/a.本"), ("日本/a", ".本"))
+
+    def test_expandvars_same_as_os_path(self):
+        with os_helper.EnvironmentVarGuard() as env:
+            env.clear()
+            env["foo"] = "bar"
+            for path in ["$日本/$foo", "${foo:-x}", "$foo$", "${}", "${foo",
+                         "${foo/$foo", "$foo${foo}$foo1"]:
+                for p in [path, path.encode()]:
+                    with self.subTest(path=p):
+                        self.assertEqual(posixpath.expandvars(p),
+                                         os.path.expandvars(p))
+
+    def test_expanduser_unknown_user(self):
+        # An unknown user name is left unchanged.
+        for path in ["~fpath-no-such-user", "~fpath-no-such-user/a"]:
+            self.assertEqual(posixpath.expanduser(path), path)
+            self.assertEqual(posixpath.expanduser(os.fsencode(path)),
+                             os.fsencode(path))
+
+    def test_realpath_embedded_null(self):
+        # The error message is the same as os.path.realpath().
+        for path in ["/a\0b", b"/a\0b"]:
+            with self.assertRaises(ValueError) as expected:
+                os.path.realpath(path)
+            with self.assertRaises(ValueError) as cm:
+                posixpath.realpath(path)
+            self.assertEqual(str(cm.exception), str(expected.exception))
+
     def test_expanduser(self):
         self.assertEqual(posixpath.expanduser("foo"), "foo")
         self.assertEqual(posixpath.expanduser(b"foo"), b"foo")
@@ -431,6 +491,31 @@ class PosixPathTest(unittest.TestCase):
         ("/////foo/..", "/"),
     ]
 
+
+    @unittest.skipIf(sys.platform == "vxworks",
+                     "no home directory on VxWorks")
+    def test_expanduser_pwd2(self):
+        pwd = import_helper.import_module('pwd')
+        getpwall = support.get_attribute(pwd, 'getpwall')
+        names = [entry.pw_name for entry in getpwall()]
+        maxusers = 1000 if support.is_resource_enabled('cpu') else 100
+        if len(names) > maxusers:
+            # Select random names, half of them with non-ASCII name,
+            # if available.
+            random.shuffle(names)
+            names.sort(key=lambda name: name.isascii())
+            del names[maxusers//2:-maxusers//2]
+        for name in names:
+            # gh-121200: pw_dir can be different between getpwall() and
+            # getpwnam(), so use getpwnam() pw_dir as expanduser() does.
+            entry = pwd.getpwnam(name)
+            home = entry.pw_dir
+            home = home.rstrip('/') or '/'
+
+            with self.subTest(name=name, pw_dir=entry.pw_dir):
+                self.assertEqual(posixpath.expanduser('~' + name), home)
+                self.assertEqual(posixpath.expanduser(os.fsencode('~' + name)),
+                                 os.fsencode(home))
     def test_normpath(self):
         for path, expected in self.NORMPATH_CASES:
             with self.subTest(path):
@@ -965,6 +1050,7 @@ class PosixPathTest(unittest.TestCase):
 
     def test_relpath(self):
         curdir = os.path.split(os.getcwd())[-1]
+        self.assertRaises(TypeError, posixpath.relpath, None)
         self.assertRaises(ValueError, posixpath.relpath, "")
         self.assertEqual(posixpath.relpath("a"), "a")
         self.assertEqual(posixpath.relpath(posixpath.abspath("a")), "a")
