@@ -296,15 +296,15 @@ fn realpath_mode(py: Python<'_>, strict: Option<&Bound<'_, PyAny>>) -> PyResult<
         Some(strict) => strict,
         None => return Ok(RealpathMode::NonStrict),
     };
-    if let Some(sentinel) = os_path_sentinel(py, &ALLOW_MISSING, "ALLOW_MISSING")? {
-        if strict.is(sentinel) {
-            return Ok(RealpathMode::AllowMissing);
-        }
+    if let Some(sentinel) = os_path_sentinel(py, &ALLOW_MISSING, "ALLOW_MISSING")?
+        && strict.is(sentinel)
+    {
+        return Ok(RealpathMode::AllowMissing);
     }
-    if let Some(sentinel) = os_path_sentinel(py, &ALL_BUT_LAST, "ALL_BUT_LAST")? {
-        if strict.is(sentinel) {
-            return Ok(RealpathMode::AllButLast);
-        }
+    if let Some(sentinel) = os_path_sentinel(py, &ALL_BUT_LAST, "ALL_BUT_LAST")?
+        && strict.is(sentinel)
+    {
+        return Ok(RealpathMode::AllButLast);
     }
     if strict.is_truthy()? {
         Ok(RealpathMode::Strict)

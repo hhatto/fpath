@@ -2,7 +2,7 @@
 name = "fpath"
 version = "0.2.0"
 authors = ["Hideo Hattori <hhatto.jp@gmail.com>"]
-edition = "2021"
+edition = "2024"
 
 [lib]
 name = "_fpath"
